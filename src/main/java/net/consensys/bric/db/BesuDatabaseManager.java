@@ -10,13 +10,12 @@ import java.nio.file.Paths;
 import java.util.*;
 
 /**
- * Singleton manager for Besu RocksDB database connections.
+ * Manager for Besu RocksDB database connections.
  * Provides read-only access to Besu databases.
  */
 public class BesuDatabaseManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(BesuDatabaseManager.class);
-    private static BesuDatabaseManager instance;
 
     private RocksDB db;
     private String currentPath;
@@ -32,15 +31,7 @@ public class BesuDatabaseManager {
         UNKNOWN
     }
 
-    private BesuDatabaseManager() {
-        // Private constructor for singleton
-    }
-
-    public static synchronized BesuDatabaseManager getInstance() {
-        if (instance == null) {
-            instance = new BesuDatabaseManager();
-        }
-        return instance;
+    public BesuDatabaseManager() {
     }
 
     /**

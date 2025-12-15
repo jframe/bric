@@ -13,8 +13,8 @@ public class DbInfoCommand implements Command {
 
     private final BesuDatabaseManager dbManager;
 
-    public DbInfoCommand() {
-        this.dbManager = BesuDatabaseManager.getInstance();
+    public DbInfoCommand(BesuDatabaseManager dbManager) {
+        this.dbManager = dbManager;
     }
 
     @Override

@@ -9,8 +9,8 @@ public class DbCloseCommand implements Command {
 
     private final BesuDatabaseManager dbManager;
 
-    public DbCloseCommand() {
-        this.dbManager = BesuDatabaseManager.getInstance();
+    public DbCloseCommand(BesuDatabaseManager dbManager) {
+        this.dbManager = dbManager;
     }
 
     @Override

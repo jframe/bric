@@ -9,8 +9,8 @@ public class DbOpenCommand implements Command {
 
     private final BesuDatabaseManager dbManager;
 
-    public DbOpenCommand() {
-        this.dbManager = BesuDatabaseManager.getInstance();
+    public DbOpenCommand(BesuDatabaseManager dbManager) {
+        this.dbManager = dbManager;
     }
 
     @Override

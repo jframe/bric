@@ -38,14 +38,14 @@ public class BricApplication implements Callable<Integer> {
     public Integer call() {
         printWelcomeBanner();
 
+        BricCommandProcessor processor = new BricCommandProcessor(verbose);
+
         // Add shutdown hook to close database
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
-                net.consensys.bric.db.BesuDatabaseManager dbManager =
-                    net.consensys.bric.db.BesuDatabaseManager.getInstance();
-                if (dbManager.isOpen()) {
+                if (processor.getDbManager().isOpen()) {
                     LOG.info("Closing database on shutdown...");
-                    dbManager.closeDatabase();
+                    processor.getDbManager().closeDatabase();
                 }
             } catch (Exception e) {
                 LOG.error("Error closing database on shutdown", e);
@@ -60,7 +60,7 @@ public class BricApplication implements Callable<Integer> {
                 .terminal(terminal)
                 .build();
 
-            runRepl(reader);
+            runRepl(reader, processor);
 
         } catch (IOException e) {
             LOG.error("Failed to initialize terminal", e);
@@ -70,8 +70,7 @@ public class BricApplication implements Callable<Integer> {
         return 0;
     }
 
-    private void runRepl(LineReader reader) {
-        BricCommandProcessor processor = new BricCommandProcessor(verbose);
+    private void runRepl(LineReader reader, BricCommandProcessor processor) {
 
         while (true) {
             String line;

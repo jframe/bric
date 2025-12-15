@@ -1,6 +1,7 @@
 package net.consensys.bric;
 
 import net.consensys.bric.commands.*;
+import net.consensys.bric.db.BesuDatabaseManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,11 +12,17 @@ public class BricCommandProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(BricCommandProcessor.class);
     private final boolean verbose;
     private final Map<String, Command> commands = new LinkedHashMap<>();
+    private final BesuDatabaseManager dbManager;
 
     public BricCommandProcessor(boolean verbose) {
         this.verbose = verbose;
+        this.dbManager = new BesuDatabaseManager();
         registerBuiltInCommands();
         registerDatabaseCommands();
+    }
+
+    public BesuDatabaseManager getDbManager() {
+        return dbManager;
     }
 
     /**
@@ -86,9 +93,9 @@ public class BricCommandProcessor {
      * Register database commands.
      */
     private void registerDatabaseCommands() {
-        registerCommand("db-open", new DbOpenCommand());
-        registerCommand("db-close", new DbCloseCommand());
-        registerCommand("db-info", new DbInfoCommand());
+        registerCommand("db-open", new DbOpenCommand(dbManager));
+        registerCommand("db-close", new DbCloseCommand(dbManager));
+        registerCommand("db-info", new DbInfoCommand(dbManager));
     }
 
     public void processCommand(String commandLine) {
