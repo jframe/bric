@@ -1,11 +1,21 @@
-# Bric
+# Bric - Besu Database Explorer REPL
 
-A simple REPL (Read-Eval-Print Loop) command-line interface for Besu.
+A command-line REPL tool for exploring Hyperledger Besu databases. Query account data, storage slots, contract bytecode, and trie logs (state diffs) directly from Besu's RocksDB database.
+
+## Features
+
+- 🔍 **Account Queries** - View account balance, nonce, storage root, and code hash
+- 💾 **Storage Exploration** - Query contract storage slots by address and slot number
+- 📜 **Bytecode Access** - Retrieve and save contract bytecode
+- 📊 **Trie Log Analysis** - Examine state changes (diffs) per block with detailed formatting
+- 🗄️ **Database Management** - Read-only access to Besu Bonsai and Bonsai Archive databases
+- 📈 **Database Statistics** - View column family sizes and key counts
 
 ## Requirements
 
-- Java 17 or higher
-- Gradle 7.x or higher (or use the Gradle wrapper)
+- Java 21 or higher
+- Gradle 8.x or higher (or use the Gradle wrapper)
+- Access to a Besu database (Bonsai or Bonsai Archive format)
 
 ## Building the Project
 
@@ -42,70 +52,173 @@ java -jar build/libs/bric-1.0.0-SNAPSHOT-all.jar
 java -jar build/libs/bric-1.0.0-SNAPSHOT-all.jar --verbose
 ```
 
+## Quick Start
+
+```bash
+# Build the project
+./gradlew build
+
+# Run the REPL
+./gradlew run
+
+# In the REPL, open a Besu database
+bric> db-open /path/to/besu/database
+
+# Query an account
+bric> account 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
+
+# View trie log (state diff) for a block
+bric> trielog 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+```
+
 ## Available Commands
 
 Once the REPL is running, you can use the following commands:
 
 ### General Commands
-- `help` - Display available commands
+- `help` - Display available commands and their descriptions
 - `version` - Display version information
-- `status` - Display REPL status
+- `status` - Display REPL status and open database info
 - `exit` or `quit` - Exit the REPL
 
 ### Database Commands
-- `db-open <path>` - Open a Besu database in read-only mode
-- `db-close` - Close the currently open database
-- `db-info` - Display database statistics and column family information
 
-## Project Structure
+#### `db-open <path>`
+Open a Besu database in read-only mode. Automatically detects database format (Bonsai or Bonsai Archive).
 
+**Examples:**
 ```
-bric/
-├── src/
-│   ├── main/
-│   │   ├── java/
-│   │   │   └── net/consensys/bric/
-│   │   │       ├── BricApplication.java
-│   │   │       └── BricCommandProcessor.java
-│   │   └── resources/
-│   │       └── log4j2.xml
-│   └── test/
-│       └── java/
-│           └── net/consensys/bric/
-│               └── BricCommandProcessorTest.java
-├── build.gradle
-├── settings.gradle
-└── README.md
+db-open /path/to/besu/database
+db-open ~/besu-data/database
 ```
 
-## Dependencies
+#### `db-close`
+Close the currently open database.
 
-- **JLine 3** - Enhanced terminal and console functionality
-- **Picocli** - Command-line parsing
-- **RocksDB** - Database access for Besu databases
-- **Besu Datatypes** - Core Besu data structures
-- **Tuweni** - Bytes operations and RLP encoding/decoding
-- **Log4j2** - Logging framework
-- **JUnit 5** - Testing framework
+#### `db-info`
+Display detailed database statistics including column family sizes and estimated key counts.
 
-### Dependency Management
+### Account Commands
 
-Dependencies are managed using:
-- **Spring Dependency Management Plugin** - For centralized version management
-- **Ben Manes Versions Plugin** - For checking dependency updates
+#### `account <address>`
+Query account information by Ethereum address. Displays nonce, balance (in Wei and ETH), storage root, and code hash.
 
-Versions are defined in `gradle/versions.gradle`. To check for outdated dependencies, run:
-
-```bash
-./gradlew dependencyUpdates
+**Examples:**
 ```
+account 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
+account 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+```
+
+#### `account <hash> --hash`
+Query account information by raw account hash (for debugging).
+
+**Example:**
+```
+account 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef --hash
+```
+
+### Storage Commands
+
+#### `storage <address> <slot>`
+Query storage slot value by contract address and slot number. Slot can be decimal or hex format.
+
+**Examples:**
+```
+storage 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0 0
+storage 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0 0x1234
+storage 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 42
+```
+
+#### `storage <account-hash> <slot-hash> --raw`
+Query storage by raw hashes (for debugging).
+
+**Example:**
+```
+storage 0x1234...abcd 0x5678...ef01 --raw
+```
+
+### Code Commands
+
+#### `code <address>`
+Retrieve contract bytecode by address. Shows code hash, size, and bytecode (truncated if >1000 bytes).
+
+**Examples:**
+```
+code 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
+code 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+```
+
+#### `code <address> --save <file>`
+Save contract bytecode to a file.
+
+**Example:**
+```
+code 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0 --save contract.bin
+```
+
+#### `code-hash <hash>`
+Retrieve bytecode by code hash (for debugging).
+
+**Example:**
+```
+code-hash 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+```
+
+### Trie Log Commands
+
+#### `trielog <block-hash>`
+Query trie log (state diff) for a specific block. Shows detailed state changes including:
+- **Account Changes**: Created, updated, or deleted accounts with balance/nonce/storage root changes
+- **Code Changes**: Deployed or cleared contract code
+- **Storage Changes**: Storage slot modifications
+
+**Example:**
+```
+trielog 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+```
+
+**Output Example:**
+```
+Trie Log (State Diff):
+  Block Hash: 0x1234...abcdef
+  Block Number: 12,345
+
+Summary:
+  Account Changes: 2
+  Code Changes:    1
+  Storage Changes: 5
+
+═══ Account Changes ═══
+
+Address: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
+  Status: UPDATED
+  Nonce:       1 → 2
+  Balance:     1,000,000,000,000,000,000 Wei (1.000000000000000000 ETH) →
+               2,000,000,000,000,000,000 Wei (2.000000000000000000 ETH)
+
+═══ Storage Changes ═══
+
+Address: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
+  Storage Slots (2 changes):
+    Slot: 0x0000000000000000000000000000000000000000000000000000000000000000
+      Value: 0x0 → 0x1
+```
+
+**Note:** Trie logs are only available in Besu Bonsai Archive databases.
 
 ## Development
 
 ### Running Tests
 
 ```bash
+# Run all tests
 ./gradlew test
+
+# Run specific test class
+./gradlew test --tests "*TrieLogFormatterTest"
+
+# Run with verbose output
+./gradlew test --info
 ```
 
 ### Cleaning Build Artifacts
@@ -113,3 +226,48 @@ Versions are defined in `gradle/versions.gradle`. To check for outdated dependen
 ```bash
 ./gradlew clean
 ```
+
+### Code Coverage
+
+To view test coverage:
+
+```bash
+./gradlew test jacocoTestReport
+# View report at: build/reports/jacoco/test/html/index.html
+```
+
+## Usage Tips
+
+### Finding Block Hashes
+
+To query trie logs, you need block hashes. These can be obtained from:
+1. Besu's JSON-RPC API: `eth_getBlockByNumber`
+2. Block explorers (Etherscan, etc.)
+3. Database exploration tools
+
+## Technical Details
+
+### Database Format Support
+
+Bric supports Besu's **Bonsai** and **Bonsai Archive** storage formats:
+- **Bonsai**: Current state only, optimized for space
+- **Bonsai Archive**: Current state + historical state diffs (trie logs)
+
+### Key Encoding
+
+Besu uses specific key encoding schemes:
+- **Account Keys**: `Keccak256(address)` (32 bytes)
+- **Storage Keys**: `Concat(AccountHash, SlotHash)` (64 bytes)
+- **Code Keys**: Code hash (32 bytes)
+- **Trie Log Keys**: Block hash (32 bytes)
+
+### RLP Decoding
+
+Account and storage data is RLP-encoded in the database:
+- **Account**: `RLP[nonce, balance, storageRoot, codeHash]`
+- **Storage**: `RLP[UInt256]`
+- **Trie Logs**: Complex nested RLP structure parsed using `TrieLogFactoryImpl`
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
