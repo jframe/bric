@@ -52,15 +52,28 @@ java -jar build/libs/bric-1.0.0-SNAPSHOT-all.jar
 java -jar build/libs/bric-1.0.0-SNAPSHOT-all.jar --verbose
 ```
 
+### With database pre-loaded
+
+```bash
+./gradlew run --args="--database /path/to/besu/database"
+# or
+java -jar build/libs/bric-1.0.0-SNAPSHOT-all.jar --database /path/to/besu/database
+
+# Combined with verbose mode
+java -jar build/libs/bric-1.0.0-SNAPSHOT-all.jar --database /path/to/besu/database --verbose
+```
+
 ## Quick Start
 
 ```bash
 # Build the project
 ./gradlew build
 
-# Run the REPL
-./gradlew run
+# Option 1: Run the REPL with database pre-loaded
+./gradlew run --args="--database /path/to/besu/database"
 
+# Option 2: Run the REPL and open database manually
+./gradlew run
 # In the REPL, open a Besu database
 bric> db-open /path/to/besu/database
 

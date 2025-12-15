@@ -29,6 +29,9 @@ public class BricApplication implements Callable<Integer> {
     @Option(names = {"-v", "--verbose"}, description = "Verbose mode")
     private boolean verbose;
 
+    @Option(names = {"-d", "--database"}, description = "Database path to open on startup")
+    private String databasePath;
+
     public static void main(String[] args) {
         int exitCode = new CommandLine(new BricApplication()).execute(args);
         System.exit(exitCode);
@@ -39,6 +42,24 @@ public class BricApplication implements Callable<Integer> {
         printWelcomeBanner();
 
         BricCommandProcessor processor = new BricCommandProcessor(verbose);
+
+        // Auto-open database if path provided
+        if (databasePath != null && !databasePath.trim().isEmpty()) {
+            try {
+                processor.getDbManager().openDatabase(databasePath);
+                System.out.println("Successfully opened database at: " + databasePath);
+                System.out.println("Database format: " + processor.getDbManager().getFormat());
+                System.out.println("Column families: " + processor.getDbManager().getColumnFamilyNames().size());
+                System.out.println();
+            } catch (Exception e) {
+                System.err.println("Error opening database: " + e.getMessage());
+                if (verbose) {
+                    LOG.error("Failed to open database", e);
+                }
+                System.err.println("Continuing without database. Use 'db-open <path>' to open a database.");
+                System.out.println();
+            }
+        }
 
         // Add shutdown hook to close database
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
