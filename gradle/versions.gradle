@@ -33,8 +33,10 @@ dependencyManagement {
         dependency 'org.bouncycastle:bcprov-jdk18on:1.80'
 
         // Besu
-        dependency 'org.hyperledger.besu:besu-datatypes:25.1.0'
-        dependency 'org.hyperledger.besu.internal:rlp:25.1.0'
+        dependency 'org.hyperledger.besu:besu-datatypes:25.12.0'
+        dependency 'org.hyperledger.besu:besu-plugin-api:25.12.0'
+        dependency 'org.hyperledger.besu.internal:besu-ethereum-rlp:25.12.0'
+        dependency 'org.hyperledger.besu.internal:besu-ethereum-core:25.12.0'
 
         // Testing
         dependency 'org.assertj:assertj-core:3.24.2'

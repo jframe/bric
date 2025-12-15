@@ -8,6 +8,8 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogFactoryImpl;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -246,6 +248,44 @@ public class BesuDatabaseReader {
         data.bytecode = rawData.get();
 
         return Optional.of(data);
+    }
+
+    /**
+     * Read trie log (state diff) by block hash.
+     * Parses the RLP data into a TrieLogLayer using Besu's internal classes.
+     *
+     * @param blockHash The block hash
+     * @return Optional containing trie log data if found
+     */
+    public Optional<TrieLogData> readTrieLog(Hash blockHash) {
+        Optional<byte[]> rawData = segmentReader.get(
+            KeyValueSegmentIdentifier.TRIE_LOG_STORAGE,
+            blockHash.toArrayUnsafe()
+        );
+
+        if (rawData.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try {
+            // Parse RLP data using Besu's TrieLogFactoryImpl
+            TrieLogFactoryImpl factory = new TrieLogFactoryImpl();
+            TrieLogLayer layer = factory.deserialize(rawData.get());
+
+            TrieLogData trieLog = new TrieLogData();
+            trieLog.blockHash = blockHash;
+            trieLog.trieLogLayer = layer;
+
+            // Extract block number if available
+            if (layer.getBlockNumber().isPresent()) {
+                trieLog.blockNumber = layer.getBlockNumber().get();
+            }
+
+            return Optional.of(trieLog);
+        } catch (Exception e) {
+            LOG.error("Failed to parse trie log for block {}", blockHash, e);
+            return Optional.empty();
+        }
     }
 
     /**

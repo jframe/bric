@@ -99,6 +99,7 @@ public class BricCommandProcessor {
         registerCommand("account", new AccountCommand(dbManager));
         registerCommand("storage", new StorageCommand(dbManager));
         registerCommand("code", new CodeCommand(dbManager));
+        registerCommand("trielog", new TrieLogCommand(dbManager));
     }
 
     public void processCommand(String commandLine) {
