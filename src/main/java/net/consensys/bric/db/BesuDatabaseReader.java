@@ -194,6 +194,61 @@ public class BesuDatabaseReader {
     }
 
     /**
+     * Read contract bytecode by address.
+     *
+     * @param address The contract address
+     * @return Optional containing code data if found
+     */
+    public Optional<CodeData> readCode(Address address) {
+        // First read the account to get the code hash
+        Optional<AccountData> accountData = readAccount(address);
+
+        if (accountData.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Hash codeHash = accountData.get().codeHash;
+
+        // Check for empty code hash (EOA)
+        if (codeHash.equals(Hash.EMPTY)) {
+            return Optional.empty();
+        }
+
+        return readCodeByHash(codeHash, address);
+    }
+
+    /**
+     * Read contract bytecode by code hash.
+     *
+     * @param codeHash The 32-byte code hash
+     * @return Optional containing code data if found
+     */
+    public Optional<CodeData> readCodeByHash(Hash codeHash) {
+        return readCodeByHash(codeHash, null);
+    }
+
+    /**
+     * Internal method to read code by hash with optional address.
+     */
+    private Optional<CodeData> readCodeByHash(Hash codeHash, Address address) {
+        Optional<byte[]> rawData = segmentReader.get(
+            KeyValueSegmentIdentifier.CODE_STORAGE,
+            codeHash.toArrayUnsafe()
+        );
+
+        if (rawData.isEmpty()) {
+            return Optional.empty();
+        }
+
+        CodeData data = new CodeData();
+        data.address = address;
+        data.codeHash = codeHash;
+        data.bytecode = rawData.get();
+
+        return Optional.of(data);
+    }
+
+    /**
      * Account data container.
      */
     public static class AccountData {
@@ -214,5 +269,14 @@ public class BesuDatabaseReader {
         public Hash accountHash;
         public Hash slotHash;
         public UInt256 value;
+    }
+
+    /**
+     * Code data container.
+     */
+    public static class CodeData {
+        public Address address;
+        public Hash codeHash;
+        public byte[] bytecode;
     }
 }
