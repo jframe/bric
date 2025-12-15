@@ -1,0 +1,42 @@
+// ./gradlew dependencyUpdates to report outdated dependencies
+dependencyManagement {
+    imports {
+        // Import log4j BOM for version coordination
+        mavenBom 'org.apache.logging.log4j:log4j-bom:2.21.1'
+        mavenBom 'org.junit:junit-bom:5.10.1'
+    }
+
+    dependencies {
+        // JLine
+        dependency 'org.jline:jline:3.24.1'
+
+        // SLF4J
+        dependency 'org.slf4j:slf4j-api:2.0.9'
+
+        // Picocli
+        dependency 'info.picocli:picocli:4.7.5'
+
+        // RocksDB
+        dependency 'org.rocksdb:rocksdbjni:9.7.3'
+
+        // Tuweni
+        dependencySet(group: 'io.consensys.tuweni', version: '2.7.2') {
+            entry 'tuweni-bytes'
+            entry 'tuweni-units'
+            entry 'tuweni-rlp'
+        }
+
+        // Guava
+        dependency 'com.google.guava:guava:33.4.2-jre'
+
+        // BouncyCastle
+        dependency 'org.bouncycastle:bcprov-jdk18on:1.80'
+
+        // Besu
+        dependency 'org.hyperledger.besu:besu-datatypes:25.1.0'
+
+        // Testing
+        dependency 'org.assertj:assertj-core:3.24.2'
+        dependency 'org.mockito:mockito-core:5.7.0'
+    }
+}

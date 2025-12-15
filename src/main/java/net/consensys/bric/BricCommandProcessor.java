@@ -1,54 +1,129 @@
 package net.consensys.bric;
 
+import net.consensys.bric.commands.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
+import java.util.*;
 
 public class BricCommandProcessor {
 
     private static final Logger LOG = LoggerFactory.getLogger(BricCommandProcessor.class);
     private final boolean verbose;
+    private final Map<String, Command> commands = new LinkedHashMap<>();
 
     public BricCommandProcessor(boolean verbose) {
         this.verbose = verbose;
+        registerBuiltInCommands();
+        registerDatabaseCommands();
+    }
+
+    /**
+     * Register a command.
+     */
+    public void registerCommand(String name, Command command) {
+        commands.put(name.toLowerCase(), command);
+    }
+
+    /**
+     * Register built-in commands.
+     */
+    private void registerBuiltInCommands() {
+        // Register built-in commands as anonymous classes
+        registerCommand("help", new Command() {
+            @Override
+            public void execute(String[] args) {
+                printHelp();
+            }
+
+            @Override
+            public String getHelp() {
+                return "Display this help message";
+            }
+
+            @Override
+            public String getUsage() {
+                return "help";
+            }
+        });
+
+        registerCommand("version", new Command() {
+            @Override
+            public void execute(String[] args) {
+                printVersion();
+            }
+
+            @Override
+            public String getHelp() {
+                return "Display version information";
+            }
+
+            @Override
+            public String getUsage() {
+                return "version";
+            }
+        });
+
+        registerCommand("status", new Command() {
+            @Override
+            public void execute(String[] args) {
+                printStatus();
+            }
+
+            @Override
+            public String getHelp() {
+                return "Display REPL status";
+            }
+
+            @Override
+            public String getUsage() {
+                return "status";
+            }
+        });
+    }
+
+    /**
+     * Register database commands.
+     */
+    private void registerDatabaseCommands() {
+        registerCommand("db-open", new DbOpenCommand());
+        registerCommand("db-close", new DbCloseCommand());
+        registerCommand("db-info", new DbInfoCommand());
     }
 
     public void processCommand(String commandLine) {
         String[] parts = commandLine.split("\\s+");
-        String command = parts[0].toLowerCase();
+        String commandName = parts[0].toLowerCase();
         String[] args = Arrays.copyOfRange(parts, 1, parts.length);
 
         if (verbose) {
-            LOG.info("Processing command: {} with args: {}", command, Arrays.toString(args));
+            LOG.info("Processing command: {} with args: {}", commandName, Arrays.toString(args));
         }
 
-        switch (command) {
-            case "help":
-                printHelp();
-                break;
-            case "version":
-                printVersion();
-                break;
-            case "echo":
-                echo(args);
-                break;
-            case "status":
-                printStatus();
-                break;
-            default:
-                System.out.println("Unknown command: " + command);
-                System.out.println("Type 'help' for available commands");
+        Command command = commands.get(commandName);
+        if (command != null) {
+            try {
+                command.execute(args);
+            } catch (Exception e) {
+                System.err.println("Error executing command: " + e.getMessage());
+                if (verbose) {
+                    e.printStackTrace();
+                }
+            }
+        } else {
+            System.out.println("Unknown command: " + commandName);
+            System.out.println("Type 'help' for available commands");
         }
     }
 
     private void printHelp() {
         System.out.println("\nAvailable commands:");
-        System.out.println("  help        - Display this help message");
-        System.out.println("  version     - Display version information");
-        System.out.println("  echo <msg>  - Echo back the message");
-        System.out.println("  status      - Display REPL status");
-        System.out.println("  exit/quit   - Exit the REPL");
+        for (Map.Entry<String, Command> entry : commands.entrySet()) {
+            String name = entry.getKey();
+            Command cmd = entry.getValue();
+            System.out.printf("  %-30s - %s%n", cmd.getUsage(), cmd.getHelp());
+        }
+        System.out.println("  exit/quit                      - Exit the REPL");
         System.out.println();
     }
 
@@ -56,18 +131,14 @@ public class BricCommandProcessor {
         System.out.println("Bric CLI version 1.0.0");
     }
 
-    private void echo(String[] args) {
-        if (args.length == 0) {
-            System.out.println();
-        } else {
-            System.out.println(String.join(" ", args));
-        }
-    }
-
     private void printStatus() {
         System.out.println("Status:");
         System.out.println("  Verbose mode: " + (verbose ? "enabled" : "disabled"));
         System.out.println("  Java version: " + System.getProperty("java.version"));
         System.out.println("  Working directory: " + System.getProperty("user.dir"));
+    }
+
+    public boolean isVerbose() {
+        return verbose;
     }
 }

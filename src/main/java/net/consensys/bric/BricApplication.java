@@ -38,6 +38,20 @@ public class BricApplication implements Callable<Integer> {
     public Integer call() {
         printWelcomeBanner();
 
+        // Add shutdown hook to close database
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                net.consensys.bric.db.BesuDatabaseManager dbManager =
+                    net.consensys.bric.db.BesuDatabaseManager.getInstance();
+                if (dbManager.isOpen()) {
+                    LOG.info("Closing database on shutdown...");
+                    dbManager.closeDatabase();
+                }
+            } catch (Exception e) {
+                LOG.error("Error closing database on shutdown", e);
+            }
+        }));
+
         try (Terminal terminal = TerminalBuilder.builder()
                 .system(true)
                 .build()) {

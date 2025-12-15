@@ -27,12 +27,6 @@ class BricCommandProcessorTest {
     }
 
     @Test
-    void testEchoCommand() {
-        processor.processCommand("echo Hello World");
-        assertThat(outContent.toString().trim()).isEqualTo("Hello World");
-    }
-
-    @Test
     void testVersionCommand() {
         processor.processCommand("version");
         assertThat(outContent.toString()).contains("Bric CLI version");
@@ -45,8 +39,8 @@ class BricCommandProcessorTest {
         assertThat(output).contains("Available commands:");
         assertThat(output).contains("help");
         assertThat(output).contains("version");
-        assertThat(output).contains("echo");
         assertThat(output).contains("status");
+        assertThat(output).contains("db-open");
     }
 
     @Test
