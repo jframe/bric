@@ -40,6 +40,9 @@ public class DbOpenCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "db-open <path>";
+        return "db-open <path>\n" +
+               "                               Examples:\n" +
+               "                                 db-open /path/to/besu/database\n" +
+               "                                 db-open ~/besu-data/database";
     }
 }

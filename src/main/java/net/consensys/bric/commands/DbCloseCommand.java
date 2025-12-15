@@ -20,9 +20,13 @@ public class DbCloseCommand implements Command {
             return;
         }
 
-        String path = dbManager.getCurrentPath();
-        dbManager.closeDatabase();
-        System.out.println("Closed database: " + path);
+        try {
+            String path = dbManager.getCurrentPath();
+            dbManager.closeDatabase();
+            System.out.println("Closed database: " + path);
+        } catch (Exception e) {
+            System.err.println("Error closing database: " + e.getMessage());
+        }
     }
 
     @Override
