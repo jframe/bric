@@ -19,8 +19,8 @@ dependencyManagement {
         // RocksDB
         dependency 'org.rocksdb:rocksdbjni:9.7.3'
 
-        // Tuweni
-        dependencySet(group: 'io.consensys.tuweni', version: '2.7.2') {
+        // Tuweni (Apache)
+        dependencySet(group: 'org.apache.tuweni', version: '2.3.1') {
             entry 'tuweni-bytes'
             entry 'tuweni-units'
             entry 'tuweni-rlp'
@@ -34,6 +34,7 @@ dependencyManagement {
 
         // Besu
         dependency 'org.hyperledger.besu:besu-datatypes:25.1.0'
+        dependency 'org.hyperledger.besu.internal:rlp:25.1.0'
 
         // Testing
         dependency 'org.assertj:assertj-core:3.24.2'

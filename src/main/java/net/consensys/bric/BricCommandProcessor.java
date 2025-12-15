@@ -96,6 +96,8 @@ public class BricCommandProcessor {
         registerCommand("db-open", new DbOpenCommand(dbManager));
         registerCommand("db-close", new DbCloseCommand(dbManager));
         registerCommand("db-info", new DbInfoCommand(dbManager));
+        registerCommand("account", new AccountCommand(dbManager));
+        registerCommand("storage", new StorageCommand(dbManager));
     }
 
     public void processCommand(String commandLine) {

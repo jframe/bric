@@ -38,9 +38,9 @@ dependencies {
     implementation 'org.rocksdb:rocksdbjni'
 
     // Tuweni for bytes operations (includes RLP)
-    implementation 'io.consensys.tuweni:tuweni-bytes'
-    implementation 'io.consensys.tuweni:tuweni-units'
-    implementation 'io.consensys.tuweni:tuweni-rlp'
+    implementation 'org.apache.tuweni:tuweni-bytes'
+    implementation 'org.apache.tuweni:tuweni-units'
+    implementation 'org.apache.tuweni:tuweni-rlp'
 
     // Guava for utilities
     implementation 'com.google.guava:guava'
@@ -50,6 +50,7 @@ dependencies {
 
     // Besu dependencies
     implementation 'org.hyperledger.besu:besu-datatypes'
+    implementation 'org.hyperledger.besu.internal:rlp'
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter'
