@@ -113,21 +113,18 @@ Display detailed database statistics including column family sizes and estimated
 
 ### Account Commands
 
-#### `account <address>`
-Query account information by Ethereum address. Displays nonce, balance (in Wei and ETH), storage root, and code hash.
+#### `account <address|hash>`
+Query account information by Ethereum address or account hash. Automatically detects the input type based on length:
+- 20-byte address (42 hex characters with 0x prefix)
+- 32-byte hash (66 hex characters with 0x prefix)
+
+Displays nonce, balance (in Wei and ETH), storage root, and code hash.
 
 **Examples:**
 ```
 account 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
 account 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
-```
-
-#### `account <hash> --hash`
-Query account information by raw account hash (for debugging).
-
-**Example:**
-```
-account 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef --hash
+account 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
 ```
 
 ### Storage Commands

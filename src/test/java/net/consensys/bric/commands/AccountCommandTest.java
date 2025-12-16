@@ -56,12 +56,11 @@ class AccountCommandTest {
 
     @Test
     void testHashQueryFormat() {
-        // Hash query should not throw when parsed
+        // Hash query should not throw when parsed (auto-detected by length)
         assertThat(dbManager.isOpen()).isFalse();
 
         command.execute(new String[]{
-            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "--hash"
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
         });
 
         assertThat(dbManager.isOpen()).isFalse();

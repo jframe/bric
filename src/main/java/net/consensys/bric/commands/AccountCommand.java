@@ -39,13 +39,8 @@ public class AccountCommand implements Command {
 
         String addressOrHash = args[0];
 
-        // Check if this is a raw hash query (--hash flag or 64-char hex)
-        boolean isHashQuery = false;
-        if (args.length >= 2 && args[1].equals("--hash")) {
-            isHashQuery = true;
-        } else if (addressOrHash.startsWith("0x") && addressOrHash.length() == 66) {
-            isHashQuery = true;
-        }
+        // Auto-detect based on size: 42 chars (0x + 40 hex) = address, 66 chars (0x + 64 hex) = hash
+        boolean isHashQuery = addressOrHash.startsWith("0x") && addressOrHash.length() == 66;
 
         try {
             Optional<AccountData> accountData;
@@ -133,9 +128,9 @@ public class AccountCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "account <address> [--hash]\n" +
+        return "account <address|hash>\n" +
                "                               Examples:\n" +
-               "                                 account 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb\n" +
-               "                                 account 0x1234...abcd --hash";
+               "                                 account 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb  (20-byte address)\n" +
+               "                                 account 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef  (32-byte hash)";
     }
 }
