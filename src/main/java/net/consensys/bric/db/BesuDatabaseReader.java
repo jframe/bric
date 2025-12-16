@@ -310,6 +310,104 @@ public class BesuDatabaseReader {
     }
 
     /**
+     * Read storage slot value at a specific block number.
+     * Only works with Bonsai Archive databases.
+     *
+     * @param address The contract address
+     * @param slot The storage slot (as UInt256)
+     * @param blockNumber The block number to query
+     * @return Optional containing storage data if found
+     */
+    public Optional<StorageData> readStorageAtBlock(Address address, UInt256 slot, long blockNumber) {
+        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
+            LOG.warn("readStorageAtBlock only supported for Bonsai Archive databases");
+            return Optional.empty();
+        }
+
+        Hash accountHash = segmentReader.computeAccountHash(address);
+        Hash slotHash = Hash.hash(slot);
+
+        return readStorageArchive(address, slot, accountHash, slotHash, Optional.of(blockNumber));
+    }
+
+    /**
+     * Read storage slot value by raw hashes at a specific block number.
+     * Only works with Bonsai Archive databases.
+     *
+     * @param accountHash The account hash
+     * @param slotHash The slot hash
+     * @param blockNumber The block number to query
+     * @return Optional containing storage data if found
+     */
+    public Optional<StorageData> readStorageByHashAtBlock(Hash accountHash, Hash slotHash, long blockNumber) {
+        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
+            LOG.warn("readStorageByHashAtBlock only supported for Bonsai Archive databases");
+            return Optional.empty();
+        }
+
+        return readStorageArchive(null, null, accountHash, slotHash, Optional.of(blockNumber));
+    }
+
+    /**
+     * Read storage from archive column families using block number suffixes.
+     * Searches for the storage slot at or before the specified block (or latest if no block specified).
+     * Key encoding: accountHash (32 bytes) + slotHash (32 bytes) + blockNumber (8 bytes) = 72 bytes
+     *
+     * @param address The contract address (can be null if only hash is known)
+     * @param slot The storage slot (can be null if only hash is known)
+     * @param accountHash The account hash
+     * @param slotHash The slot hash
+     * @param blockNumber Optional block number to query (empty = latest)
+     * @return Optional containing storage data if found
+     */
+    private Optional<StorageData> readStorageArchive(Address address, UInt256 slot,
+                                                     Hash accountHash, Hash slotHash,
+                                                     Optional<Long> blockNumber) {
+        // Create search key: accountHash (32) + slotHash (32) + blockSuffix (8)
+        byte[] blockSuffix = blockNumber
+            .map(bn -> Bytes.ofUnsignedLong(bn).toArrayUnsafe())
+            .orElse(MAX_BLOCK_SUFFIX);
+
+        byte[] naturalKey = Bytes.concatenate(
+            Bytes.wrap(accountHash.toArrayUnsafe()),
+            Bytes.wrap(slotHash.toArrayUnsafe())
+        ).toArrayUnsafe();
+
+        byte[] searchKey = Bytes.concatenate(
+            Bytes.wrap(naturalKey),
+            Bytes.wrap(blockSuffix)
+        ).toArrayUnsafe();
+
+        // Query ACCOUNT_STORAGE_ARCHIVE with 64-byte prefix (accountHash + slotHash)
+        Optional<SegmentReader.KeyValuePair> result = segmentReader.getNearestBefore(
+            KeyValueSegmentIdentifier.ACCOUNT_STORAGE_ARCHIVE,
+            searchKey,
+            64  // prefix length: 32 (accountHash) + 32 (slotHash)
+        );
+
+        if (result.isEmpty()) {
+            return Optional.empty();
+        }
+
+        // Extract block number from key suffix (last 8 bytes after 64-byte prefix)
+        Long foundBlockNumber = null;
+        if (result.get().key.length >= 72) {
+            byte[] suffix = new byte[8];
+            System.arraycopy(result.get().key, 64, suffix, 0, 8);
+            foundBlockNumber = Bytes.wrap(suffix).toLong();
+        }
+
+        try {
+            StorageData data = parseStorageData(result.get().value, address, slot, accountHash, slotHash);
+            data.blockNumber = foundBlockNumber;
+            return Optional.of(data);
+        } catch (Exception e) {
+            LOG.error("Failed to parse archive storage data for address {} slot {}", address, slot, e);
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Parse RLP-encoded account data.
      * Format: RLP[nonce, balance, storageRoot, codeHash]
      */
@@ -532,6 +630,7 @@ public class BesuDatabaseReader {
         public Hash accountHash;
         public Hash slotHash;
         public UInt256 value;
+        public Long blockNumber;  // Block number when storage was retrieved (archive databases only)
     }
 
     /**

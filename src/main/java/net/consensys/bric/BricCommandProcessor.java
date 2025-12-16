@@ -106,6 +106,7 @@ public class BricCommandProcessor {
         registerCommand("storage", new StorageCommand(dbManager));
         registerCommand("code", new CodeCommand(dbManager));
         registerCommand("trielog", new TrieLogCommand(dbManager));
+        registerCommand("trielog-compare", new TrieLogCompareCommand(dbManager));
     }
 
     public void processCommand(String commandLine) {
