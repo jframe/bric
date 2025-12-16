@@ -199,7 +199,7 @@ public class TrieLogCompareCommand implements Command {
             }
 
             // Query archive at this block
-            Optional<BesuDatabaseReader.AccountData> archiveData =
+            Optional<AccountData> archiveData =
                 dbReader.readAccountAtBlock(address, blockNumber);
 
             if (archiveData.isEmpty()) {
@@ -219,7 +219,7 @@ public class TrieLogCompareCommand implements Command {
             result.totalAccountComparisons++;
             boolean hasFieldMismatch = false;
 
-            BesuDatabaseReader.AccountData archive = archiveData.get();
+            AccountData archive = archiveData.get();
 
             // Compare nonce
             if (updated.getNonce() != archive.nonce) {
@@ -307,7 +307,7 @@ public class TrieLogCompareCommand implements Command {
                 }
 
                 // Query storage archive
-                Optional<BesuDatabaseReader.StorageData> archiveStorage =
+                Optional<StorageData> archiveStorage =
                     dbReader.readStorageByHashAtBlock(accountHash, slotHash, blockNumber);
 
                 if (archiveStorage.isEmpty()) {
@@ -375,7 +375,7 @@ public class TrieLogCompareCommand implements Command {
             Hash expectedCodeHash = Hash.hash(updatedCode);
 
             // Query account to get actual code hash
-            Optional<BesuDatabaseReader.AccountData> accountData =
+            Optional<AccountData> accountData =
                 dbReader.readAccountAtBlock(address, blockNumber);
 
             if (accountData.isEmpty()) {

@@ -1,7 +1,7 @@
 package net.consensys.bric.formatters;
 
 import org.apache.tuweni.units.bigints.UInt256;
-import net.consensys.bric.db.BesuDatabaseReader.StorageData;
+import net.consensys.bric.db.StorageData;
 
 import java.math.BigInteger;
 

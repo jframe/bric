@@ -1,11 +1,11 @@
 package net.consensys.bric.db;
 
+import net.consensys.bric.besu.BesuFlatDbReader;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogFactoryImpl;
@@ -24,11 +24,7 @@ public class BesuDatabaseReader {
     private static final Logger LOG = LoggerFactory.getLogger(BesuDatabaseReader.class);
     private final SegmentReader segmentReader;
     private final BesuDatabaseManager dbManager;
-
-    // Block number suffix for archive queries (matching Besu's BonsaiArchiveFlatDbStrategy)
-    // Uses Long.MAX_VALUE to find the most recent version of an account/storage
-    private static final byte[] MAX_BLOCK_SUFFIX = Bytes.ofUnsignedLong(Long.MAX_VALUE).toArrayUnsafe();
-    private static final int ACCOUNT_HASH_SIZE = 32;
+    private final BesuFlatDbReader besuReader;
 
     // Block header prefix for BLOCKCHAIN segment (matching Besu's KeyValueStoragePrefixedKeyBlockchainStorage)
     private static final byte[] BLOCK_HEADER_PREFIX = new byte[] {0x02};
@@ -36,39 +32,17 @@ public class BesuDatabaseReader {
     public BesuDatabaseReader(BesuDatabaseManager dbManager) {
         this.segmentReader = new SegmentReader(dbManager);
         this.dbManager = dbManager;
+        this.besuReader = new BesuFlatDbReader(dbManager);
     }
 
     /**
      * Read account information by Ethereum address.
-     * For Bonsai Archive databases, falls back to archive query if not found in main column family.
      *
      * @param address The Ethereum address
      * @return Optional containing account data if found
      */
     public Optional<AccountData> readAccount(Address address) {
-        Hash accountHash = segmentReader.computeAccountHash(address);
-
-        // Try regular lookup first
-        Optional<byte[]> rawData = segmentReader.get(
-            KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE,
-            accountHash.toArrayUnsafe()
-        );
-
-        if (rawData.isPresent()) {
-            try {
-                return Optional.of(parseAccountData(rawData.get(), address, accountHash, null));
-            } catch (Exception e) {
-                LOG.error("Failed to parse account data for address {}", address, e);
-                return Optional.empty();
-            }
-        }
-
-        // For Bonsai Archive databases, try archive lookup
-        if (dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            return readAccountArchive(address, accountHash, Optional.empty());
-        }
-
-        return Optional.empty();
+        return besuReader.readAccount(address);
     }
 
     /**
@@ -80,44 +54,17 @@ public class BesuDatabaseReader {
      * @return Optional containing account data if found
      */
     public Optional<AccountData> readAccountAtBlock(Address address, long blockNumber) {
-        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            LOG.warn("readAccountAtBlock only supported for Bonsai Archive databases");
-            return Optional.empty();
-        }
-
-        Hash accountHash = segmentReader.computeAccountHash(address);
-        return readAccountArchive(address, accountHash, Optional.of(blockNumber));
+        return besuReader.readAccountAtBlock(address, blockNumber);
     }
 
     /**
      * Read account information by account hash (for debugging).
-     * For Bonsai Archive databases, falls back to archive query if not found in main column family.
      *
      * @param accountHash The 32-byte account hash
      * @return Optional containing account data if found
      */
     public Optional<AccountData> readAccountByHash(Hash accountHash) {
-        // Try regular lookup first
-        Optional<byte[]> rawData = segmentReader.get(
-            KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE,
-            accountHash.toArrayUnsafe()
-        );
-
-        if (rawData.isPresent()) {
-            try {
-                return Optional.of(parseAccountData(rawData.get(), null, accountHash, null));
-            } catch (Exception e) {
-                LOG.error("Failed to parse account data for hash {}", accountHash, e);
-                return Optional.empty();
-            }
-        }
-
-        // For Bonsai Archive databases, try archive lookup
-        if (dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            return readAccountArchive(null, accountHash, Optional.empty());
-        }
-
-        return Optional.empty();
+        return besuReader.readAccountByHash(accountHash);
     }
 
     /**
@@ -134,64 +81,9 @@ public class BesuDatabaseReader {
             return Optional.empty();
         }
 
-        return readAccountArchive(null, accountHash, Optional.of(blockNumber));
+        return besuReader.readAccountByHashAtBlock(accountHash, blockNumber);
     }
 
-    /**
-     * Read account from archive column families using block number suffixes.
-     * Searches for the account at or before the specified block (or latest if no block specified).
-     *
-     * @param address The Ethereum address (can be null if only hash is known)
-     * @param accountHash The account hash
-     * @param blockNumber Optional block number to query (empty = latest)
-     * @return Optional containing account data if found
-     */
-    private Optional<AccountData> readAccountArchive(Address address, Hash accountHash, Optional<Long> blockNumber) {
-        // Create search key: accountHash + blockSuffix
-        byte[] blockSuffix = blockNumber
-            .map(bn -> Bytes.ofUnsignedLong(bn).toArrayUnsafe())
-            .orElse(MAX_BLOCK_SUFFIX);
-
-        byte[] searchKey = Bytes.concatenate(
-            Bytes.wrap(accountHash.toArrayUnsafe()),
-            Bytes.wrap(blockSuffix)
-        ).toArrayUnsafe();
-
-        // Try ACCOUNT_INFO_STATE first (may have archive entries with suffixes)
-        Optional<SegmentReader.KeyValuePair> result = segmentReader.getNearestBefore(
-            KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE,
-            searchKey,
-            ACCOUNT_HASH_SIZE
-        );
-
-        // If not found in ACCOUNT_INFO_STATE, try ACCOUNT_INFO_STATE_ARCHIVE
-        if (result.isEmpty()) {
-            result = segmentReader.getNearestBefore(
-                KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
-                searchKey,
-                ACCOUNT_HASH_SIZE
-            );
-        }
-
-        if (result.isEmpty()) {
-            return Optional.empty();
-        }
-
-        // Extract block number from key suffix (last 8 bytes)
-        Long foundBlockNumber = null;
-        if (result.get().key.length >= ACCOUNT_HASH_SIZE + 8) {
-            byte[] suffix = new byte[8];
-            System.arraycopy(result.get().key, ACCOUNT_HASH_SIZE, suffix, 0, 8);
-            foundBlockNumber = Bytes.wrap(suffix).toLong();
-        }
-
-        try {
-            return Optional.of(parseAccountData(result.get().value, address, accountHash, foundBlockNumber));
-        } catch (Exception e) {
-            LOG.error("Failed to parse archive account data for address {} hash {}", address, accountHash, e);
-            return Optional.empty();
-        }
-    }
 
     /**
      * Get block number from block hash by retrieving and parsing the block header.
@@ -207,13 +99,11 @@ public class BesuDatabaseReader {
      */
     public Optional<Long> getBlockNumberFromHash(Hash blockHash) {
         try {
-            // Create key: BLOCK_HEADER_PREFIX (0x02) + blockHash (32 bytes)
             byte[] key = Bytes.concatenate(
                 Bytes.wrap(BLOCK_HEADER_PREFIX),
                 Bytes.wrap(blockHash.toArrayUnsafe())
             ).toArrayUnsafe();
 
-            // Read block header from BLOCKCHAIN segment
             Optional<byte[]> rawData = segmentReader.get(
                 KeyValueSegmentIdentifier.BLOCKCHAIN,
                 key
@@ -224,7 +114,6 @@ public class BesuDatabaseReader {
                 return Optional.empty();
             }
 
-            // Parse block header RLP
             RLPInput headerRlp = new BytesValueRLPInput(Bytes.wrap(rawData.get()), false).readAsRlp();
             if (headerRlp.enterList() == 0) {
                 LOG.error("Empty block header RLP for hash: {}", blockHash.toHexString());
@@ -260,26 +149,7 @@ public class BesuDatabaseReader {
      * @return Optional containing storage data if found
      */
     public Optional<StorageData> readStorage(Address address, UInt256 slot) {
-        Hash accountHash = segmentReader.computeAccountHash(address);
-        Hash slotHash = Hash.hash(slot);
-
-        byte[] storageKey = segmentReader.computeStorageKey(accountHash, slotHash);
-
-        Optional<byte[]> rawData = segmentReader.get(
-            KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
-            storageKey
-        );
-
-        if (rawData.isEmpty()) {
-            return Optional.empty();
-        }
-
-        try {
-            return Optional.of(parseStorageData(rawData.get(), address, slot, accountHash, slotHash));
-        } catch (Exception e) {
-            LOG.error("Failed to parse storage data for address {} slot {}", address, slot, e);
-            return Optional.empty();
-        }
+        return besuReader.readStorage(address, slot);
     }
 
     /**
@@ -290,23 +160,7 @@ public class BesuDatabaseReader {
      * @return Optional containing storage data if found
      */
     public Optional<StorageData> readStorageByHash(Hash accountHash, Hash slotHash) {
-        byte[] storageKey = segmentReader.computeStorageKey(accountHash, slotHash);
-
-        Optional<byte[]> rawData = segmentReader.get(
-            KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
-            storageKey
-        );
-
-        if (rawData.isEmpty()) {
-            return Optional.empty();
-        }
-
-        try {
-            return Optional.of(parseStorageData(rawData.get(), null, null, accountHash, slotHash));
-        } catch (Exception e) {
-            LOG.error("Failed to parse storage data for hashes {} {}", accountHash, slotHash, e);
-            return Optional.empty();
-        }
+        return besuReader.readStorageByHash(accountHash, slotHash);
     }
 
     /**
@@ -324,10 +178,7 @@ public class BesuDatabaseReader {
             return Optional.empty();
         }
 
-        Hash accountHash = segmentReader.computeAccountHash(address);
-        Hash slotHash = Hash.hash(slot);
-
-        return readStorageArchive(address, slot, accountHash, slotHash, Optional.of(blockNumber));
+        return besuReader.readStorageAtBlock(address, slot, blockNumber);
     }
 
     /**
@@ -345,144 +196,9 @@ public class BesuDatabaseReader {
             return Optional.empty();
         }
 
-        return readStorageArchive(null, null, accountHash, slotHash, Optional.of(blockNumber));
+        return besuReader.readStorageByHashAtBlock(accountHash, slotHash, blockNumber);
     }
 
-    /**
-     * Read storage from archive column families using block number suffixes.
-     * Searches for the storage slot at or before the specified block (or latest if no block specified).
-     * Key encoding: accountHash (32 bytes) + slotHash (32 bytes) + blockNumber (8 bytes) = 72 bytes
-     *
-     * @param address The contract address (can be null if only hash is known)
-     * @param slot The storage slot (can be null if only hash is known)
-     * @param accountHash The account hash
-     * @param slotHash The slot hash
-     * @param blockNumber Optional block number to query (empty = latest)
-     * @return Optional containing storage data if found
-     */
-    private Optional<StorageData> readStorageArchive(Address address, UInt256 slot,
-                                                     Hash accountHash, Hash slotHash,
-                                                     Optional<Long> blockNumber) {
-        // Create search key: accountHash (32) + slotHash (32) + blockSuffix (8)
-        byte[] blockSuffix = blockNumber
-            .map(bn -> Bytes.ofUnsignedLong(bn).toArrayUnsafe())
-            .orElse(MAX_BLOCK_SUFFIX);
-
-        byte[] naturalKey = Bytes.concatenate(
-            Bytes.wrap(accountHash.toArrayUnsafe()),
-            Bytes.wrap(slotHash.toArrayUnsafe())
-        ).toArrayUnsafe();
-
-        byte[] searchKey = Bytes.concatenate(
-            Bytes.wrap(naturalKey),
-            Bytes.wrap(blockSuffix)
-        ).toArrayUnsafe();
-
-        // Query ACCOUNT_STORAGE_ARCHIVE with 64-byte prefix (accountHash + slotHash)
-        Optional<SegmentReader.KeyValuePair> result = segmentReader.getNearestBefore(
-            KeyValueSegmentIdentifier.ACCOUNT_STORAGE_ARCHIVE,
-            searchKey,
-            64  // prefix length: 32 (accountHash) + 32 (slotHash)
-        );
-
-        if (result.isEmpty()) {
-            return Optional.empty();
-        }
-
-        // Extract block number from key suffix (last 8 bytes after 64-byte prefix)
-        Long foundBlockNumber = null;
-        if (result.get().key.length >= 72) {
-            byte[] suffix = new byte[8];
-            System.arraycopy(result.get().key, 64, suffix, 0, 8);
-            foundBlockNumber = Bytes.wrap(suffix).toLong();
-        }
-
-        try {
-            StorageData data = parseStorageData(result.get().value, address, slot, accountHash, slotHash);
-            data.blockNumber = foundBlockNumber;
-            return Optional.of(data);
-        } catch (Exception e) {
-            LOG.debug("Failed to parse archive storage data for address {} slot {}: {}", address, slot, e.getMessage());
-            return Optional.empty();
-        }
-    }
-
-    /**
-     * Parse RLP-encoded account data.
-     * Format: RLP[nonce, balance, storageRoot, codeHash]
-     */
-    private AccountData parseAccountData(byte[] rawData, Address address, Hash accountHash, Long blockNumber) {
-        RLPInput rlpInput = new BytesValueRLPInput(Bytes.wrap(rawData), false);
-
-        rlpInput.enterList();
-
-        long nonce = rlpInput.readLongScalar();
-        Wei balance = Wei.of(rlpInput.readUInt256Scalar());
-
-        Bytes32 storageRoot;
-        if (rlpInput.nextIsNull()) {
-            storageRoot = Hash.EMPTY_TRIE_HASH;
-            rlpInput.skipNext();
-        } else {
-            storageRoot = rlpInput.readBytes32();
-        }
-
-        Bytes32 codeHash;
-        if (rlpInput.nextIsNull()) {
-            codeHash = Hash.EMPTY;
-            rlpInput.skipNext();
-        } else {
-            codeHash = rlpInput.readBytes32();
-        }
-
-        rlpInput.leaveList();
-
-        AccountData data = new AccountData();
-        data.address = address;
-        data.accountHash = accountHash;
-        data.nonce = nonce;
-        data.balance = balance;
-        data.storageRoot = Hash.wrap(storageRoot);
-        data.codeHash = Hash.wrap(codeHash);
-        data.blockNumber = blockNumber;
-
-        return data;
-    }
-
-    /**
-     * Parse storage value from raw bytes.
-     * Storage values in Bonsai flatdb are stored as raw bytes (not RLP-encoded).
-     * However, we try RLP parsing first for backward compatibility.
-     */
-    private StorageData parseStorageData(byte[] rawData, Address address, UInt256 slot,
-                                         Hash accountHash, Hash slotHash) {
-        UInt256 value;
-
-        // Try parsing as raw bytes first (Bonsai archive format)
-        try {
-            // Storage values are stored as raw UInt256 bytes, not RLP-encoded
-            value = UInt256.fromBytes(Bytes.wrap(rawData));
-        } catch (Exception e) {
-            // If raw bytes parsing fails, try RLP (for backward compatibility)
-            try {
-                RLPInput rlpInput = new BytesValueRLPInput(Bytes.wrap(rawData), false);
-                value = rlpInput.readUInt256Scalar();
-            } catch (Exception rlpException) {
-                // If both fail, log and treat as zero
-                LOG.debug("Failed to parse storage value as raw bytes or RLP, treating as zero: rawData length={}", rawData.length);
-                value = UInt256.ZERO;
-            }
-        }
-
-        StorageData data = new StorageData();
-        data.address = address;
-        data.slot = slot;
-        data.accountHash = accountHash;
-        data.slotHash = slotHash;
-        data.value = value;
-
-        return data;
-    }
 
     /**
      * Read contract bytecode by address.
@@ -491,7 +207,6 @@ public class BesuDatabaseReader {
      * @return Optional containing code data if found
      */
     public Optional<CodeData> readCode(Address address) {
-        // First read the account to get the code hash
         Optional<AccountData> accountData = readAccount(address);
 
         if (accountData.isEmpty()) {
@@ -500,7 +215,6 @@ public class BesuDatabaseReader {
 
         Hash codeHash = accountData.get().codeHash;
 
-        // Check for empty code hash (EOA)
         if (codeHash.equals(Hash.EMPTY)) {
             return Optional.empty();
         }
@@ -541,13 +255,11 @@ public class BesuDatabaseReader {
 
     /**
      * Read block hash by block number.
-     * Uses the BLOCKCHAIN segment with prefix 0x05 + UInt256(blockNumber).
      *
      * @param blockNumber The block number
      * @return Optional containing block hash if found
      */
     public Optional<Hash> readBlockHashByNumber(long blockNumber) {
-        // Key format: BLOCK_HASH_PREFIX (0x05) + UInt256(blockNumber)
         byte[] prefix = new byte[]{0x05};
         UInt256 blockNumberUInt = UInt256.valueOf(blockNumber);
         byte[] key = Bytes.concatenate(Bytes.of(prefix), blockNumberUInt).toArrayUnsafe();
@@ -571,7 +283,6 @@ public class BesuDatabaseReader {
 
     /**
      * Read trie log (state diff) by block hash.
-     * Parses the RLP data into a TrieLogLayer using Besu's internal classes.
      *
      * @param blockHash The block hash
      * @return Optional containing trie log data if found
@@ -587,7 +298,6 @@ public class BesuDatabaseReader {
         }
 
         try {
-            // Parse RLP data using Besu's TrieLogFactoryImpl
             TrieLogFactoryImpl factory = new TrieLogFactoryImpl();
             TrieLogLayer layer = factory.deserialize(rawData.get());
 
@@ -595,7 +305,6 @@ public class BesuDatabaseReader {
             trieLog.blockHash = blockHash;
             trieLog.trieLogLayer = layer;
 
-            // Extract block number if available
             if (layer.getBlockNumber().isPresent()) {
                 trieLog.blockNumber = layer.getBlockNumber().get();
             }
@@ -609,7 +318,6 @@ public class BesuDatabaseReader {
 
     /**
      * Read trie log (state diff) by block number.
-     * First looks up the block hash, then retrieves the trie log.
      *
      * @param blockNumber The block number
      * @return Optional containing trie log data if found
@@ -622,39 +330,5 @@ public class BesuDatabaseReader {
         }
 
         return readTrieLog(blockHash.get());
-    }
-
-    /**
-     * Account data container.
-     */
-    public static class AccountData {
-        public Address address;
-        public Hash accountHash;
-        public long nonce;
-        public Wei balance;
-        public Hash storageRoot;
-        public Hash codeHash;
-        public Long blockNumber;  // Block number when account was retrieved (archive databases only)
-    }
-
-    /**
-     * Storage data container.
-     */
-    public static class StorageData {
-        public Address address;
-        public UInt256 slot;
-        public Hash accountHash;
-        public Hash slotHash;
-        public UInt256 value;
-        public Long blockNumber;  // Block number when storage was retrieved (archive databases only)
-    }
-
-    /**
-     * Code data container.
-     */
-    public static class CodeData {
-        public Address address;
-        public Hash codeHash;
-        public byte[] bytecode;
     }
 }

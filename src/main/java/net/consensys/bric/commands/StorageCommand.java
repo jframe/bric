@@ -3,7 +3,7 @@ package net.consensys.bric.commands;
 import org.apache.tuweni.units.bigints.UInt256;
 import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.BesuDatabaseReader;
-import net.consensys.bric.db.BesuDatabaseReader.StorageData;
+import net.consensys.bric.db.StorageData;
 import net.consensys.bric.formatters.StorageFormatter;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;

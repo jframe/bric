@@ -1,6 +1,6 @@
 package net.consensys.bric.formatters;
 
-import net.consensys.bric.db.BesuDatabaseReader.AccountData;
+import net.consensys.bric.db.AccountData;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;

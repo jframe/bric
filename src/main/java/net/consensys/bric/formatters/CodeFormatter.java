@@ -1,6 +1,6 @@
 package net.consensys.bric.formatters;
 
-import net.consensys.bric.db.BesuDatabaseReader.CodeData;
+import net.consensys.bric.db.CodeData;
 import org.apache.tuweni.bytes.Bytes;
 
 /**

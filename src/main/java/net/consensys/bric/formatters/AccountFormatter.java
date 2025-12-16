@@ -1,7 +1,7 @@
 package net.consensys.bric.formatters;
 
 import org.apache.tuweni.units.bigints.UInt256;
-import net.consensys.bric.db.BesuDatabaseReader.AccountData;
+import net.consensys.bric.db.AccountData;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 
