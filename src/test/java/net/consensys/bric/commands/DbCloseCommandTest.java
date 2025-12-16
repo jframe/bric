@@ -75,6 +75,6 @@ class DbCloseCommandTest {
     @Test
     void testGetUsage() {
         String usage = command.getUsage();
-        assertThat(usage).contains("db-close");
+        assertThat(usage).contains("db close");
     }
 }

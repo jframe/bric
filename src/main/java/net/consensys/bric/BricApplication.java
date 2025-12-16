@@ -1,5 +1,6 @@
 package net.consensys.bric;
 
+import net.consensys.bric.completion.BricCompleter;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.UserInterruptException;
@@ -56,7 +57,7 @@ public class BricApplication implements Callable<Integer> {
                 if (verbose) {
                     LOG.error("Failed to open database", e);
                 }
-                System.err.println("Continuing without database. Use 'db-open <path>' to open a database.");
+                System.err.println("Continuing without database. Use 'db open <path>' to open a database.");
                 System.out.println();
             }
         }
@@ -77,8 +78,12 @@ public class BricApplication implements Callable<Integer> {
                 .system(true)
                 .build()) {
 
+            // Create and register completer for command autocomplete
+            BricCompleter completer = new BricCompleter(processor);
+
             LineReader reader = LineReaderBuilder.builder()
                 .terminal(terminal)
+                .completer(completer)
                 .build();
 
             runRepl(reader, processor);

@@ -101,6 +101,6 @@ class DbInfoCommandTest {
     @Test
     void testGetUsage() {
         String usage = command.getUsage();
-        assertThat(usage).contains("db-info");
+        assertThat(usage).contains("db info");
     }
 }

@@ -40,7 +40,7 @@ class BricCommandProcessorTest {
         assertThat(output).contains("help");
         assertThat(output).contains("version");
         assertThat(output).contains("status");
-        assertThat(output).contains("db-open");
+        assertThat(output).contains("db");
     }
 
     @Test

@@ -36,6 +36,6 @@ public class DbCloseCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "db-close";
+        return "db close";
     }
 }

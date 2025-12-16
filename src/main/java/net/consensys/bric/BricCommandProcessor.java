@@ -26,6 +26,14 @@ public class BricCommandProcessor {
     }
 
     /**
+     * Get all registered command names.
+     * @return Set of command names
+     */
+    public Set<String> getCommandNames() {
+        return commands.keySet();
+    }
+
+    /**
      * Register a command.
      */
     public void registerCommand(String name, Command command) {
@@ -93,9 +101,7 @@ public class BricCommandProcessor {
      * Register database commands.
      */
     private void registerDatabaseCommands() {
-        registerCommand("db-open", new DbOpenCommand(dbManager));
-        registerCommand("db-close", new DbCloseCommand(dbManager));
-        registerCommand("db-info", new DbInfoCommand(dbManager));
+        registerCommand("db", new DbCommand(dbManager));
         registerCommand("account", new AccountCommand(dbManager));
         registerCommand("storage", new StorageCommand(dbManager));
         registerCommand("code", new CodeCommand(dbManager));

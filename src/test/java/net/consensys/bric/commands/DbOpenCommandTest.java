@@ -77,7 +77,7 @@ class DbOpenCommandTest {
     @Test
     void testGetUsage() {
         String usage = command.getUsage();
-        assertThat(usage).contains("db-open");
+        assertThat(usage).contains("db open");
         assertThat(usage).contains("<path>");
         assertThat(usage).contains("Examples:");
     }

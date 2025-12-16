@@ -75,7 +75,7 @@ java -jar build/libs/bric-1.0.0-SNAPSHOT-all.jar --database /path/to/besu/databa
 # Option 2: Run the REPL and open database manually
 ./gradlew run
 # In the REPL, open a Besu database
-bric> db-open /path/to/besu/database
+bric> db open /path/to/besu/database
 
 # Query an account
 bric> account 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
@@ -96,19 +96,19 @@ Once the REPL is running, you can use the following commands:
 
 ### Database Commands
 
-#### `db-open <path>`
+#### `db open <path>`
 Open a Besu database in read-only mode. Automatically detects database format (Bonsai or Bonsai Archive).
 
 **Examples:**
 ```
-db-open /path/to/besu/database
-db-open ~/besu-data/database
+db open /path/to/besu/database
+db open ~/besu-data/database
 ```
 
-#### `db-close`
+#### `db close`
 Close the currently open database.
 
-#### `db-info`
+#### `db info`
 Display detailed database statistics including column family sizes and estimated key counts.
 
 ### Account Commands

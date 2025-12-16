@@ -121,13 +121,16 @@ public interface Command {
 ```
 
 Commands are located in `src/main/java/net/consensys/bric/commands/`:
-- `DbOpenCommand` - Opens database in read-only mode
-- `DbCloseCommand` - Closes current database
-- `DbInfoCommand` - Shows database statistics
+- `DbCommand` - Parent command for database operations with subcommands (open, close, info)
+  - `DbOpenCommand` - Opens database in read-only mode (via `db open`)
+  - `DbCloseCommand` - Closes current database (via `db close`)
+  - `DbInfoCommand` - Shows database statistics (via `db info`)
 - `AccountCommand` - Queries account by address or hash
 - `StorageCommand` - Queries storage slot by address and slot number
 - `CodeCommand` - Retrieves bytecode by address or code hash (supports `--save` flag)
 - `TrieLogCommand` - Retrieves state diffs by block hash
+
+The `DbCommand` uses a subcommand routing pattern where the first argument determines which subcommand to execute.
 
 ### Formatter Pattern
 
