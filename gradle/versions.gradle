@@ -35,6 +35,7 @@ dependencyManagement {
         // Besu
         dependency 'org.hyperledger.besu:besu-datatypes:25.12.0'
         dependency 'org.hyperledger.besu:besu-plugin-api:25.12.0'
+        dependency 'org.hyperledger.besu:besu-evm:25.12.0'
         dependency 'org.hyperledger.besu.internal:besu-ethereum-rlp:25.12.0'
         dependency 'org.hyperledger.besu.internal:besu-ethereum-core:25.12.0'
 

@@ -4,12 +4,13 @@ import net.consensys.bric.db.AccountData;
 import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.StorageData;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
-import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.apache.tuweni.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiArchiveFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFullFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeHashCodeStorageStrategy;
@@ -81,18 +82,22 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Parse account value using Besu's PmtStateTrieAccountValue
-            PmtStateTrieAccountValue accountValue = PmtStateTrieAccountValue.readFrom(
-                    new BytesValueRLPInput(accountBytes.get(), false)
+            // Parse account value using Besu's BonsaiAccount.fromRLP()
+            BonsaiAccount account = BonsaiAccount.fromRLP(
+                    null,  // worldView - not needed for read-only
+                    address,
+                    accountBytes.get(),
+                    false,  // mutable = false (read-only)
+                    null   // codeCache - not needed for read-only
             );
 
             AccountData data = new AccountData();
             data.address = address;
             data.accountHash = accountHash;
-            data.nonce = accountValue.getNonce();
-            data.balance = accountValue.getBalance();
-            data.storageRoot = accountValue.getStorageRoot();
-            data.codeHash = accountValue.getCodeHash();
+            data.nonce = account.getNonce();
+            data.balance = account.getBalance();
+            data.storageRoot = account.getStorageRoot();
+            data.codeHash = account.getCodeHash();
             data.blockNumber = null;  // Current state, no specific block
 
             return Optional.of(data);
@@ -136,18 +141,24 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Parse account value using Besu's PmtStateTrieAccountValue
-            PmtStateTrieAccountValue accountValue = PmtStateTrieAccountValue.readFrom(
-                    new BytesValueRLPInput(accountBytes.get(), false)
+            // Parse account value using Besu's BonsaiAccount.fromRLP()
+            // Note: We don't have the address, but BonsaiAccount.fromRLP requires it
+            // For hash-only queries, we'll need to pass a placeholder or handle this differently
+            BonsaiAccount account = BonsaiAccount.fromRLP(
+                    null,  // worldView - not needed for read-only
+                    Address.ZERO,  // placeholder since we don't have the actual address
+                    accountBytes.get(),
+                    false,  // mutable = false (read-only)
+                    null   // codeCache - not needed for read-only
             );
 
             AccountData data = new AccountData();
             data.address = null;  // Not available from hash-only query
             data.accountHash = accountHash;
-            data.nonce = accountValue.getNonce();
-            data.balance = accountValue.getBalance();
-            data.storageRoot = accountValue.getStorageRoot();
-            data.codeHash = accountValue.getCodeHash();
+            data.nonce = account.getNonce();
+            data.balance = account.getBalance();
+            data.storageRoot = account.getStorageRoot();
+            data.codeHash = account.getCodeHash();
             data.blockNumber = null;
 
             return Optional.of(data);
@@ -186,18 +197,22 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Parse account value using Besu's PmtStateTrieAccountValue
-            PmtStateTrieAccountValue accountValue = PmtStateTrieAccountValue.readFrom(
-                    new BytesValueRLPInput(accountBytes.get(), false)
+            // Parse account value using Besu's BonsaiAccount.fromRLP()
+            BonsaiAccount account = BonsaiAccount.fromRLP(
+                    null,  // worldView - not needed for read-only
+                    address,
+                    accountBytes.get(),
+                    false,  // mutable = false (read-only)
+                    null   // codeCache - not needed for read-only
             );
 
             AccountData data = new AccountData();
             data.address = address;
             data.accountHash = accountHash;
-            data.nonce = accountValue.getNonce();
-            data.balance = accountValue.getBalance();
-            data.storageRoot = accountValue.getStorageRoot();
-            data.codeHash = accountValue.getCodeHash();
+            data.nonce = account.getNonce();
+            data.balance = account.getBalance();
+            data.storageRoot = account.getStorageRoot();
+            data.codeHash = account.getCodeHash();
             data.blockNumber = blockNumber;
 
             return Optional.of(data);
@@ -234,18 +249,24 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Parse account value using Besu's PmtStateTrieAccountValue
-            PmtStateTrieAccountValue accountValue = PmtStateTrieAccountValue.readFrom(
-                    new BytesValueRLPInput(accountBytes.get(), false)
+            // Parse account value using Besu's BonsaiAccount.fromRLP()
+            // Note: We don't have the address, but BonsaiAccount.fromRLP requires it
+            // For hash-only queries, we'll need to pass a placeholder or handle this differently
+            BonsaiAccount account = BonsaiAccount.fromRLP(
+                    null,  // worldView - not needed for read-only
+                    Address.ZERO,  // placeholder since we don't have the actual address
+                    accountBytes.get(),
+                    false,  // mutable = false (read-only)
+                    null   // codeCache - not needed for read-only
             );
 
             AccountData data = new AccountData();
             data.address = null;  // Not available from hash-only query
             data.accountHash = accountHash;
-            data.nonce = accountValue.getNonce();
-            data.balance = accountValue.getBalance();
-            data.storageRoot = accountValue.getStorageRoot();
-            data.codeHash = accountValue.getCodeHash();
+            data.nonce = account.getNonce();
+            data.balance = account.getBalance();
+            data.storageRoot = account.getStorageRoot();
+            data.codeHash = account.getCodeHash();
             data.blockNumber = blockNumber;
 
             return Optional.of(data);
@@ -297,8 +318,8 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Storage values are stored as raw UInt256 bytes
-            UInt256 value = UInt256.fromBytes(storageBytes.get());
+            // Storage values are RLP-encoded and need to be decoded
+            UInt256 value = UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(storageBytes.get())));
 
             StorageData data = new StorageData();
             data.address = address;
@@ -355,8 +376,8 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Storage values are stored as raw UInt256 bytes
-            UInt256 value = UInt256.fromBytes(storageBytes.get());
+            // Storage values are RLP-encoded and need to be decoded
+            UInt256 value = UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(storageBytes.get())));
 
             StorageData data = new StorageData();
             data.address = null;  // Not available from hash-only query
@@ -407,8 +428,8 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Storage values are stored as raw UInt256 bytes
-            UInt256 value = UInt256.fromBytes(storageBytes.get());
+            // Storage values are RLP-encoded and need to be decoded
+            UInt256 value = UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(storageBytes.get())));
 
             StorageData data = new StorageData();
             data.address = address;
@@ -457,8 +478,8 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Storage values are stored as raw UInt256 bytes
-            UInt256 value = UInt256.fromBytes(storageBytes.get());
+            // Storage values are RLP-encoded and need to be decoded
+            UInt256 value = UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(storageBytes.get())));
 
             StorageData data = new StorageData();
             data.address = null;  // Not available from hash-only query
