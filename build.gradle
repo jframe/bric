@@ -21,6 +21,12 @@ repositories {
     maven { url = "https://artifacts.consensys.net/public/maven/maven/" }
 }
 
+dependencyManagement {
+    imports {
+        mavenBom 'org.hyperledger.besu:bom:25.12.0'
+    }
+}
+
 dependencies {
     // JLine for enhanced console/REPL functionality
     implementation 'org.jline:jline'
