@@ -251,6 +251,36 @@ public class BesuDatabaseReader {
     }
 
     /**
+     * Read block hash by block number.
+     * Uses the BLOCKCHAIN segment with prefix 0x05 + UInt256(blockNumber).
+     *
+     * @param blockNumber The block number
+     * @return Optional containing block hash if found
+     */
+    public Optional<Hash> readBlockHashByNumber(long blockNumber) {
+        // Key format: BLOCK_HASH_PREFIX (0x05) + UInt256(blockNumber)
+        byte[] prefix = new byte[]{0x05};
+        UInt256 blockNumberUInt = UInt256.valueOf(blockNumber);
+        byte[] key = Bytes.concatenate(Bytes.of(prefix), blockNumberUInt).toArrayUnsafe();
+
+        Optional<byte[]> rawData = segmentReader.get(
+            KeyValueSegmentIdentifier.BLOCKCHAIN,
+            key
+        );
+
+        if (rawData.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(Hash.wrap(Bytes32.wrap(rawData.get())));
+        } catch (Exception e) {
+            LOG.error("Failed to parse block hash for block number {}", blockNumber, e);
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Read trie log (state diff) by block hash.
      * Parses the RLP data into a TrieLogLayer using Besu's internal classes.
      *
@@ -286,6 +316,23 @@ public class BesuDatabaseReader {
             LOG.error("Failed to parse trie log for block {}", blockHash, e);
             return Optional.empty();
         }
+    }
+
+    /**
+     * Read trie log (state diff) by block number.
+     * First looks up the block hash, then retrieves the trie log.
+     *
+     * @param blockNumber The block number
+     * @return Optional containing trie log data if found
+     */
+    public Optional<TrieLogData> readTrieLogByNumber(long blockNumber) {
+        Optional<Hash> blockHash = readBlockHashByNumber(blockNumber);
+
+        if (blockHash.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return readTrieLog(blockHash.get());
     }
 
     /**
