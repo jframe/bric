@@ -31,6 +31,12 @@ public class AccountFormatter {
             sb.append("  Address:      ").append(account.address.toHexString()).append("\n");
         }
         sb.append("  Account Hash: ").append(account.accountHash.toHexString()).append("\n");
+
+        // Show block number if available (archive databases only)
+        if (account.blockNumber != null) {
+            sb.append("  Block Number: ").append(String.format("%,d", account.blockNumber)).append("\n");
+        }
+
         sb.append("  Nonce:        ").append(formatNonce(account.nonce)).append("\n");
         sb.append("  Balance:      ").append(formatBalance(account.balance)).append("\n");
         sb.append("  Storage Root: ").append(account.storageRoot.toHexString()).append("\n");

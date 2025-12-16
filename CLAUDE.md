@@ -94,10 +94,22 @@ java -jar build/libs/bric-1.0.0-SNAPSHOT-all.jar --database /path/to/besu/databa
 ### Key Encoding Scheme
 
 Besu uses specific key encodings that are critical to understand:
-- **Account Keys**: `Keccak256(address)` (32 bytes)
+- **Account Keys** (Bonsai): `Keccak256(address)` (32 bytes)
+- **Account Keys** (Bonsai Archive): `Keccak256(address) + BlockNumber` (40 bytes: 32 bytes hash + 8 bytes unsigned long)
 - **Storage Keys**: `Concat(AccountHash, SlotHash)` where SlotHash = `Keccak256(slot)` (64 bytes total)
 - **Code Keys**: Code hash (32 bytes)
 - **Trie Log Keys**: Block hash (32 bytes)
+
+#### Bonsai Archive Key Structure
+
+In Bonsai Archive flatdb, historical account and storage data includes an 8-byte block number suffix:
+- **Format**: `[Natural Key (32 bytes)] + [Block Number (8 bytes)]`
+- **Block Number Encoding**: Unsigned 64-bit long (`Bytes.ofUnsignedLong(blockNumber)`)
+- **Query Strategy**: Use `getNearestBefore()` with search key = `accountHash + blockNumber` to find the account state at or before that block
+  - For latest state: use `Long.MAX_VALUE` as block number suffix
+  - For historical state: use specific block number as suffix
+- **Deleted Entries**: Marked with empty byte array value (length = 0)
+- **Block Number Extraction**: The block number is extracted from the last 8 bytes of the returned key and displayed in query results
 
 ### Column Families (Segments)
 
@@ -126,6 +138,8 @@ Commands are located in `src/main/java/net/consensys/bric/commands/`:
   - `DbCloseCommand` - Closes current database (via `db close`)
   - `DbInfoCommand` - Shows database statistics (via `db info`)
 - `AccountCommand` - Queries account by address or hash
+  - Supports `--block <number|hash>` parameter for historical queries (Bonsai Archive only)
+  - Automatically extracts block number from archive keys
 - `StorageCommand` - Queries storage slot by address and slot number
 - `CodeCommand` - Retrieves bytecode by address or code hash (supports `--save` flag)
 - `TrieLogCommand` - Retrieves state diffs by block hash

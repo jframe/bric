@@ -51,6 +51,73 @@ public class SegmentReader {
     }
 
     /**
+     * Find the nearest key-value pair where the key is lexicographically less than or equal to the search key.
+     * This is used for archive databases where keys have block number suffixes.
+     *
+     * @param segment The column family to search
+     * @param searchKey The key to search for (typically naturalKey + maxBlockSuffix)
+     * @param prefixLength The length of the natural key prefix that must match (e.g., 32 for account hash)
+     * @return Optional containing a KeyValuePair if found and prefix matches
+     */
+    public Optional<KeyValuePair> getNearestBefore(KeyValueSegmentIdentifier segment, byte[] searchKey, int prefixLength) {
+        try {
+            ColumnFamilyHandle cfHandle = dbManager.getColumnFamily(segment);
+            if (cfHandle == null) {
+                LOG.debug("Column family not found: {}", segment.getName());
+                return Optional.empty();
+            }
+
+            try (RocksIterator iterator = dbManager.getDatabase().newIterator(cfHandle)) {
+                // Seek to the position just before or at the search key
+                iterator.seekForPrev(searchKey);
+
+                if (!iterator.isValid()) {
+                    return Optional.empty();
+                }
+
+                byte[] foundKey = iterator.key();
+                byte[] foundValue = iterator.value();
+
+                // Verify the prefix matches (e.g., same account hash)
+                if (foundKey.length < prefixLength) {
+                    return Optional.empty();
+                }
+
+                // Check if the prefix matches
+                for (int i = 0; i < prefixLength; i++) {
+                    if (foundKey[i] != searchKey[i]) {
+                        return Optional.empty();
+                    }
+                }
+
+                // Skip deleted entries (empty values in archive databases)
+                if (foundValue.length == 0) {
+                    return Optional.empty();
+                }
+
+                return Optional.of(new KeyValuePair(foundKey, foundValue));
+            }
+
+        } catch (Exception e) {
+            LOG.error("Error in getNearestBefore for segment {}: {}", segment.getName(), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Container for key-value pairs returned by getNearestBefore.
+     */
+    public static class KeyValuePair {
+        public final byte[] key;
+        public final byte[] value;
+
+        public KeyValuePair(byte[] key, byte[] value) {
+            this.key = key;
+            this.value = value;
+        }
+    }
+
+    /**
      * Compute account hash from address (Keccak256).
      */
     public Hash computeAccountHash(Address address) {
