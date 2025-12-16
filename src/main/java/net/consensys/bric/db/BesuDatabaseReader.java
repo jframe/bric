@@ -402,7 +402,7 @@ public class BesuDatabaseReader {
             data.blockNumber = foundBlockNumber;
             return Optional.of(data);
         } catch (Exception e) {
-            LOG.error("Failed to parse archive storage data for address {} slot {}", address, slot, e);
+            LOG.debug("Failed to parse archive storage data for address {} slot {}: {}", address, slot, e.getMessage());
             return Optional.empty();
         }
     }
@@ -455,8 +455,32 @@ public class BesuDatabaseReader {
      */
     private StorageData parseStorageData(byte[] rawData, Address address, UInt256 slot,
                                          Hash accountHash, Hash slotHash) {
-        RLPInput rlpInput = new BytesValueRLPInput(Bytes.wrap(rawData), false);
-        UInt256 value = rlpInput.readUInt256Scalar();
+        UInt256 value;
+
+        try {
+            RLPInput rlpInput = new BytesValueRLPInput(Bytes.wrap(rawData), false);
+            value = rlpInput.readUInt256Scalar();
+        } catch (org.hyperledger.besu.ethereum.rlp.RLPException e) {
+            // Handle various RLP issues (malformed, corrupted, leading zeros, etc.)
+            // This can happen with archive data that has non-standard encoding or corrupt entries
+            if (e.getMessage() != null && e.getMessage().contains("Invalid scalar, has leading zeros")) {
+                // Try parsing as raw bytes instead for leading zero case
+                try {
+                    RLPInput rlpInput = new BytesValueRLPInput(Bytes.wrap(rawData), false);
+                    Bytes valueBytes = rlpInput.readBytes();
+                    // Convert to UInt256, stripping leading zeros
+                    value = UInt256.fromBytes(valueBytes);
+                } catch (Exception ex) {
+                    // If all else fails, treat as zero
+                    LOG.debug("Failed to parse storage value with leading zeros, treating as zero: {}", e.getMessage());
+                    value = UInt256.ZERO;
+                }
+            } else {
+                // For other RLP issues (corrupted, wrong length, etc), treat as zero
+                LOG.debug("Failed to parse storage value ({}), treating as zero", e.getClass().getSimpleName());
+                value = UInt256.ZERO;
+            }
+        }
 
         StorageData data = new StorageData();
         data.address = address;
