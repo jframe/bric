@@ -450,34 +450,26 @@ public class BesuDatabaseReader {
     }
 
     /**
-     * Parse RLP-encoded storage value.
-     * Format: RLP-encoded UInt256
+     * Parse storage value from raw bytes.
+     * Storage values in Bonsai flatdb are stored as raw bytes (not RLP-encoded).
+     * However, we try RLP parsing first for backward compatibility.
      */
     private StorageData parseStorageData(byte[] rawData, Address address, UInt256 slot,
                                          Hash accountHash, Hash slotHash) {
         UInt256 value;
 
+        // Try parsing as raw bytes first (Bonsai archive format)
         try {
-            RLPInput rlpInput = new BytesValueRLPInput(Bytes.wrap(rawData), false);
-            value = rlpInput.readUInt256Scalar();
-        } catch (org.hyperledger.besu.ethereum.rlp.RLPException e) {
-            // Handle various RLP issues (malformed, corrupted, leading zeros, etc.)
-            // This can happen with archive data that has non-standard encoding or corrupt entries
-            if (e.getMessage() != null && e.getMessage().contains("Invalid scalar, has leading zeros")) {
-                // Try parsing as raw bytes instead for leading zero case
-                try {
-                    RLPInput rlpInput = new BytesValueRLPInput(Bytes.wrap(rawData), false);
-                    Bytes valueBytes = rlpInput.readBytes();
-                    // Convert to UInt256, stripping leading zeros
-                    value = UInt256.fromBytes(valueBytes);
-                } catch (Exception ex) {
-                    // If all else fails, treat as zero
-                    LOG.debug("Failed to parse storage value with leading zeros, treating as zero: {}", e.getMessage());
-                    value = UInt256.ZERO;
-                }
-            } else {
-                // For other RLP issues (corrupted, wrong length, etc), treat as zero
-                LOG.debug("Failed to parse storage value ({}), treating as zero", e.getClass().getSimpleName());
+            // Storage values are stored as raw UInt256 bytes, not RLP-encoded
+            value = UInt256.fromBytes(Bytes.wrap(rawData));
+        } catch (Exception e) {
+            // If raw bytes parsing fails, try RLP (for backward compatibility)
+            try {
+                RLPInput rlpInput = new BytesValueRLPInput(Bytes.wrap(rawData), false);
+                value = rlpInput.readUInt256Scalar();
+            } catch (Exception rlpException) {
+                // If both fail, log and treat as zero
+                LOG.debug("Failed to parse storage value as raw bytes or RLP, treating as zero: rawData length={}", rawData.length);
                 value = UInt256.ZERO;
             }
         }
