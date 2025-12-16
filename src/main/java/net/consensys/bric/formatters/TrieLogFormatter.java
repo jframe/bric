@@ -12,6 +12,7 @@ import org.apache.tuweni.units.bigints.UInt256;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Formats trie log (state diff) data for human-readable display.
@@ -171,16 +172,23 @@ public class TrieLogFormatter {
 
             sb.append("    Slot: ").append(slotKey.getSlotHash().toHexString()).append("\n");
 
-            UInt256 prior = change.getPrior();
-            UInt256 updated = change.getUpdated();
+            Optional<UInt256> prior = Optional.ofNullable(change.getPrior())
+                .filter(v -> !v.isZero());
+            Optional<UInt256> updated = Optional.ofNullable(change.getUpdated())
+                .filter(v -> !v.isZero());
 
-            if (prior == null || prior.isZero()) {
-                sb.append("      Value: 0x0 → ").append(updated.toHexString()).append("\n");
-            } else if (updated == null || updated.isZero()) {
-                sb.append("      Value: ").append(prior.toHexString()).append(" → 0x0 (cleared)\n");
+            String priorStr = prior.map(UInt256::toHexString).orElse("0x0");
+            String updatedStr = updated.map(UInt256::toHexString).orElse("0x0");
+
+            if (prior.isEmpty() && updated.isPresent()) {
+                sb.append("      Value: ").append(priorStr).append(" → ").append(updatedStr).append("\n");
+            } else if (prior.isPresent() && updated.isEmpty()) {
+                sb.append("      Value: ").append(priorStr).append(" → ").append(updatedStr).append(" (cleared)\n");
+            } else if (prior.isPresent() && updated.isPresent()) {
+                sb.append("      Value: ").append(priorStr).append(" → ").append(updatedStr).append("\n");
             } else {
-                sb.append("      Value: ").append(prior.toHexString())
-                  .append(" → ").append(updated.toHexString()).append("\n");
+                // Both are empty/zero - edge case, but show it
+                sb.append("      Value: ").append(priorStr).append(" → ").append(updatedStr).append(" (no change)\n");
             }
         }
     }
