@@ -3,12 +3,17 @@ package net.consensys.bric.formatters;
 import net.consensys.bric.db.TrieLogComparisonResult;
 import net.consensys.bric.db.TrieLogComparisonResult.*;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.math.RoundingMode;
 import java.util.List;
 
 /**
  * Formats trielog comparison results for human-readable display.
  */
 public class TrieLogCompareFormatter {
+
+    private static final BigInteger WEI_PER_ETH = new BigInteger("1000000000000000000");
 
     /**
      * Format single block comparison result.
@@ -228,8 +233,16 @@ public class TrieLogCompareFormatter {
     private void formatAccountMismatch(StringBuilder sb, AccountMismatch mismatch) {
         sb.append("Address: ").append(mismatch.address.toHexString()).append("\n");
         sb.append("  Field:    ").append(mismatch.field).append("\n");
-        sb.append("  Expected: ").append(mismatch.expectedValue).append("\n");
-        sb.append("  Actual:   ").append(mismatch.actualValue).append("\n");
+
+        // Special formatting for balance fields (add ETH conversion)
+        if ("balance".equals(mismatch.field)) {
+            sb.append("  Expected: ").append(formatBalanceWithEth(mismatch.expectedValue)).append("\n");
+            sb.append("  Actual:   ").append(formatBalanceWithEth(mismatch.actualValue)).append("\n");
+        } else {
+            sb.append("  Expected: ").append(mismatch.expectedValue).append("\n");
+            sb.append("  Actual:   ").append(mismatch.actualValue).append("\n");
+        }
+
         if (mismatch.archiveBlockNumber != null) {
             sb.append("  Archive Block: ").append(mismatch.archiveBlockNumber).append("\n");
         }
@@ -256,5 +269,48 @@ public class TrieLogCompareFormatter {
             sb.append(" (").append(mismatch.actualSize).append(" bytes)");
         }
         sb.append("\n\n");
+    }
+
+    /**
+     * Format a balance hex string with ETH conversion.
+     * Input is expected to be a hex string (e.g., "0x1234..." or just the balance value).
+     */
+    private String formatBalanceWithEth(String hexValue) {
+        if (hexValue == null || hexValue.isEmpty()) {
+            return "0x0 (0 ETH)";
+        }
+
+        try {
+            // Parse the hex string as BigInteger
+            BigInteger weiValue;
+            if (hexValue.startsWith("0x") || hexValue.startsWith("0X")) {
+                weiValue = new BigInteger(hexValue.substring(2), 16);
+            } else {
+                // Try parsing as hex without prefix
+                weiValue = new BigInteger(hexValue, 16);
+            }
+
+            if (weiValue.equals(BigInteger.ZERO)) {
+                return "0x0 (0 ETH)";
+            }
+
+            // Convert to ETH for human-readable reference
+            BigDecimal ethValue = new BigDecimal(weiValue)
+                .divide(new BigDecimal(WEI_PER_ETH), 18, RoundingMode.DOWN)
+                .stripTrailingZeros();
+
+            String ethStr = ethValue.toPlainString();
+            String hexOutput = "0x" + weiValue.toString(16);
+
+            if (ethStr.equals("0")) {
+                return String.format("%s (< 0.000000000000000001 ETH)", hexOutput);
+            }
+
+            return String.format("%s (%s ETH)", hexOutput, ethStr);
+
+        } catch (Exception e) {
+            // If parsing fails, return the original value
+            return hexValue;
+        }
     }
 }

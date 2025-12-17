@@ -195,8 +195,24 @@ public class TrieLogFormatter {
 
     private String formatWei(Wei wei) {
         BigInteger weiValue = wei.toBigInteger();
-        BigDecimal eth = new BigDecimal(weiValue).divide(new BigDecimal(WEI_PER_ETH));
-        return String.format("%,d Wei (%.18f ETH)", weiValue, eth);
+
+        if (weiValue.equals(BigInteger.ZERO)) {
+            return "0x0 (0 ETH)";
+        }
+
+        // Convert to ETH for human-readable reference
+        BigDecimal ethValue = new BigDecimal(weiValue)
+            .divide(new BigDecimal(WEI_PER_ETH), 18, java.math.RoundingMode.DOWN)
+            .stripTrailingZeros();
+
+        String ethStr = ethValue.toPlainString();
+        String hexValue = "0x" + weiValue.toString(16);
+
+        if (ethStr.equals("0")) {
+            return String.format("%s (< 0.000000000000000001 ETH)", hexValue);
+        }
+
+        return String.format("%s (%s ETH)", hexValue, ethStr);
     }
 
     /**
