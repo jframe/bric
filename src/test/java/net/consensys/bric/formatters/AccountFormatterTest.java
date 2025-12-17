@@ -45,8 +45,8 @@ class AccountFormatterTest {
         assertThat(formatted).contains("Address:");
         assertThat(formatted).contains("Nonce:");
         assertThat(formatted).contains("Balance:");
-        assertThat(formatted).contains("Wei");
-        assertThat(formatted).contains("ETH");
+        assertThat(formatted).contains("0x14d1120d7b160000");
+        assertThat(formatted).contains("1.5 ETH");
     }
 
     @Test
@@ -64,7 +64,7 @@ class AccountFormatterTest {
         assertThat(formatted).contains("Account Information:");
         assertThat(formatted).doesNotContain("Address:");
         assertThat(formatted).contains("Account Hash:");
-        assertThat(formatted).contains("0 Wei (0 ETH)");
+        assertThat(formatted).contains("0x0 (0 ETH)");
     }
 
     @Test
@@ -79,7 +79,7 @@ class AccountFormatterTest {
 
         String formatted = formatter.format(account);
 
-        assertThat(formatted).contains("0 Wei (0 ETH)");
+        assertThat(formatted).contains("0x0 (0 ETH)");
     }
 
     @Test
@@ -95,7 +95,7 @@ class AccountFormatterTest {
         String formatted = formatter.format(account);
 
         assertThat(formatted).contains("Balance:");
-        assertThat(formatted).contains("Wei");
+        assertThat(formatted).contains("0x");
         assertThat(formatted).contains("ETH");
     }
 

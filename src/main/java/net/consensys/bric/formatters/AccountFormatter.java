@@ -53,27 +53,29 @@ public class AccountFormatter {
     }
 
     /**
-     * Format balance showing both Wei and ETH.
-     * Example: "1500000000000000000 Wei (1.5 ETH)"
+     * Format balance showing hex value and ETH.
+     * Example: "0xde0b6b3a7640000 (1 ETH)"
      */
     private String formatBalance(Wei balance) {
         BigInteger weiValue = balance.toBigInteger();
 
         if (weiValue.equals(BigInteger.ZERO)) {
-            return "0 Wei (0 ETH)";
+            return "0x0 (0 ETH)";
         }
 
-        // Convert to ETH
+        // Convert to ETH for human-readable reference
         BigDecimal ethValue = new BigDecimal(weiValue)
             .divide(new BigDecimal(WEI_PER_ETH), 18, RoundingMode.DOWN)
             .stripTrailingZeros();
 
         String ethStr = ethValue.toPlainString();
+        String hexValue = "0x" + weiValue.toString(16);
+
         if (ethStr.equals("0")) {
-            return String.format("%,d Wei (< 0.000000000000000001 ETH)", weiValue);
+            return String.format("%s (< 0.000000000000000001 ETH)", hexValue);
         }
 
-        return String.format("%,d Wei (%s ETH)", weiValue, ethStr);
+        return String.format("%s (%s ETH)", hexValue, ethStr);
     }
 
     /**
