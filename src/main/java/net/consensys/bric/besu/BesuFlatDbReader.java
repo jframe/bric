@@ -2,6 +2,7 @@ package net.consensys.bric.besu;
 
 import net.consensys.bric.db.AccountData;
 import net.consensys.bric.db.BesuDatabaseManager;
+import net.consensys.bric.db.KeyValueSegmentIdentifier;
 import net.consensys.bric.db.StorageData;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -185,26 +186,39 @@ public class BesuFlatDbReader {
         Hash accountHash = Hash.hash(address);
 
         try {
-            // Use Besu's archive strategy to read account
-            Optional<Bytes> accountBytes = archiveStrategy.getFlatAccount(
-                    Optional::empty,  // worldStateRootHashSupplier
-                    null,  // nodeLoader (not needed for flat reads)
+            // Construct key with block number suffix: accountHash (32 bytes) + blockNumber (8 bytes)
+            Bytes searchKey = Bytes.concatenate(
                     accountHash,
-                    storage
+                    Bytes.ofUnsignedLong(blockNumber)
             );
 
-            if (accountBytes.isEmpty()) {
+            // Use getNearestBefore to find the account state at or before the specified block
+            Optional<SegmentedKeyValueStorage.NearestKeyValue> result = storage.getNearestBefore(
+                    KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
+                    searchKey
+            );
+
+            if (result.isEmpty() || result.get().value().isEmpty()) {
                 return Optional.empty();
             }
+
+            Bytes returnedKey = result.get().key();
+            byte[] accountBytes = result.get().value().get();
 
             // Parse account value using Besu's BonsaiAccount.fromRLP()
             BonsaiAccount account = BonsaiAccount.fromRLP(
                     null,  // worldView - not needed for read-only
                     address,
-                    accountBytes.get(),
+                    Bytes.wrap(accountBytes),
                     false,  // mutable = false (read-only)
                     null   // codeCache - not needed for read-only
             );
+
+            // Extract actual block number from the returned key (last 8 bytes)
+            Long actualBlockNumber = null;
+            if (returnedKey.size() >= 40) {
+                actualBlockNumber = returnedKey.slice(32, 8).toLong();
+            }
 
             AccountData data = new AccountData();
             data.address = address;
@@ -213,7 +227,7 @@ public class BesuFlatDbReader {
             data.balance = account.getBalance();
             data.storageRoot = account.getStorageRoot();
             data.codeHash = account.getCodeHash();
-            data.blockNumber = blockNumber;
+            data.blockNumber = actualBlockNumber;
 
             return Optional.of(data);
 
@@ -237,17 +251,24 @@ public class BesuFlatDbReader {
         }
 
         try {
-            // Use Besu's archive strategy to read account
-            Optional<Bytes> accountBytes = archiveStrategy.getFlatAccount(
-                    Optional::empty,  // worldStateRootHashSupplier
-                    null,  // nodeLoader (not needed for flat reads)
+            // Construct key with block number suffix: accountHash (32 bytes) + blockNumber (8 bytes)
+            Bytes searchKey = Bytes.concatenate(
                     accountHash,
-                    storage
+                    Bytes.ofUnsignedLong(blockNumber)
             );
 
-            if (accountBytes.isEmpty()) {
+            // Use getNearestBefore to find the account state at or before the specified block
+            Optional<SegmentedKeyValueStorage.NearestKeyValue> result = storage.getNearestBefore(
+                    KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
+                    searchKey
+            );
+
+            if (result.isEmpty() || result.get().value().isEmpty()) {
                 return Optional.empty();
             }
+
+            Bytes returnedKey = result.get().key();
+            byte[] accountBytes = result.get().value().get();
 
             // Parse account value using Besu's BonsaiAccount.fromRLP()
             // Note: We don't have the address, but BonsaiAccount.fromRLP requires it
@@ -255,10 +276,16 @@ public class BesuFlatDbReader {
             BonsaiAccount account = BonsaiAccount.fromRLP(
                     null,  // worldView - not needed for read-only
                     Address.ZERO,  // placeholder since we don't have the actual address
-                    accountBytes.get(),
+                    Bytes.wrap(accountBytes),
                     false,  // mutable = false (read-only)
                     null   // codeCache - not needed for read-only
             );
+
+            // Extract actual block number from the returned key (last 8 bytes)
+            Long actualBlockNumber = null;
+            if (returnedKey.size() >= 40) {
+                actualBlockNumber = returnedKey.slice(32, 8).toLong();
+            }
 
             AccountData data = new AccountData();
             data.address = null;  // Not available from hash-only query
@@ -267,7 +294,7 @@ public class BesuFlatDbReader {
             data.balance = account.getBalance();
             data.storageRoot = account.getStorageRoot();
             data.codeHash = account.getCodeHash();
-            data.blockNumber = blockNumber;
+            data.blockNumber = actualBlockNumber;
 
             return Optional.of(data);
 

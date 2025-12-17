@@ -1,5 +1,7 @@
 package net.consensys.bric.db;
 
+import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
+
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
@@ -7,7 +9,7 @@ import java.util.Arrays;
  * Segment identifiers for Besu's RocksDB column families.
  * Based on org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier
  */
-public enum KeyValueSegmentIdentifier {
+public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
     // Common segments
     BLOCKCHAIN(new byte[] {1}, "BLOCKCHAIN"),
     VARIABLES(new byte[] {11}, "VARIABLES"),
@@ -37,6 +39,18 @@ public enum KeyValueSegmentIdentifier {
 
     public String getName() {
         return name;
+    }
+
+    @Override
+    public boolean isEligibleToHighSpecFlag() {
+        // Return false for all segments (not eligible for high spec optimization)
+        return false;
+    }
+
+    @Override
+    public boolean containsStaticData() {
+        // Return false for all segments (data can change)
+        return false;
     }
 
     /**
