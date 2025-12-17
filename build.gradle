@@ -24,6 +24,8 @@ repositories {
 dependencyManagement {
     imports {
         mavenBom 'org.hyperledger.besu:bom:25.12.0'
+        // Override Besu's log4j version with newer version that includes BridgeAware
+        mavenBom 'org.apache.logging.log4j:log4j-bom:2.25.2'
     }
 }
 
@@ -67,6 +69,9 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.assertj:assertj-core'
     testImplementation 'org.mockito:mockito-core'
+    testRuntimeOnly 'org.apache.logging.log4j:log4j-api'
+    testRuntimeOnly 'org.apache.logging.log4j:log4j-core'
+    testRuntimeOnly 'org.apache.logging.log4j:log4j-slf4j2-impl'
 }
 
 application {

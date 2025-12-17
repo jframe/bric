@@ -1,8 +1,8 @@
 // ./gradlew dependencyUpdates to report outdated dependencies
 dependencyManagement {
     imports {
-        // Import log4j BOM for version coordination
-        mavenBom 'org.apache.logging.log4j:log4j-bom:2.21.1'
+        // Import log4j BOM for version coordination (2.25.2 includes BridgeAware for slf4j2 impl)
+        mavenBom 'org.apache.logging.log4j:log4j-bom:2.25.2'
         mavenBom 'org.junit:junit-bom:5.10.1'
     }
 
