@@ -95,14 +95,15 @@ public class TrieLogCheckCommand implements Command {
         long checkedBlocks = 0;
         long foundTrielogs = 0;
 
+        // Progress reporter updates every 30 seconds
+        ProgressReporter progress = new ProgressReporter(30);
+
         // Check each block in range
         for (long blockNum = startBlock; blockNum <= endBlock; blockNum++) {
             checkedBlocks++;
 
-            // Show progress for large ranges (every 1000 blocks)
-            if (checkedBlocks % 1000 == 0) {
-                System.out.println("Progress: " + checkedBlocks + "/" + totalBlocks + " blocks checked...");
-            }
+            // Report progress every 30 seconds
+            progress.reportProgress(checkedBlocks, totalBlocks, "blocks checked");
 
             // Use efficient existence check without decoding
             if (dbReader.trieLogExists(blockNum)) {

@@ -137,13 +137,14 @@ public class TrieLogCompareCommand implements Command {
             List<TrieLogComparisonResult> results = new ArrayList<>();
             long checkedBlocks = 0;
 
+            // Progress reporter updates every 30 seconds
+            ProgressReporter progress = new ProgressReporter(30);
+
             for (long blockNum = startBlock; blockNum <= endBlock; blockNum++) {
                 checkedBlocks++;
 
-                // Show progress for large ranges (every 100 blocks)
-                if (checkedBlocks % 100 == 0 || checkedBlocks == totalBlocks) {
-                    System.out.println("Progress: " + checkedBlocks + "/" + totalBlocks + " blocks compared...");
-                }
+                // Report progress every 30 seconds
+                progress.reportProgress(checkedBlocks, totalBlocks, "blocks compared");
 
                 Optional<TrieLogData> trieLogOpt = dbReader.readTrieLogByNumber(blockNum);
 
