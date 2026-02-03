@@ -89,13 +89,13 @@ class TrieLogCheckCommandTest {
     }
 
     @Test
-    void testNoArguments_FindsChainHead() throws Exception {
+    void testNoArguments_PrintsError() throws Exception {
         setupTestDatabase();
 
         command.execute(new String[]{});
 
-        String output = outputStream.toString();
-        assertThat(output).contains("Checking trielogs from block 0 to chain head");
+        String error = errorStream.toString();
+        assertThat(error).contains("Error: Missing range argument");
     }
 
     @Test
@@ -116,7 +116,7 @@ class TrieLogCheckCommandTest {
         command.execute(new String[]{"invalid"});
 
         String error = errorStream.toString();
-        assertThat(error).contains("Error: Invalid argument");
+        assertThat(error).contains("Error: Invalid range format");
     }
 
     @Test
@@ -126,7 +126,7 @@ class TrieLogCheckCommandTest {
         command.execute(new String[]{"0-5"});
 
         String error = errorStream.toString();
-        assertThat(error).contains("Error: Invalid argument");
+        assertThat(error).contains("Error: Invalid range format");
     }
 
     @Test
@@ -183,15 +183,17 @@ class TrieLogCheckCommandTest {
     }
 
     @Test
-    void testMissingRanges_ShowsConsolidatedRanges() throws Exception {
+    void testMissingBlocks_ShowsAllMissingBlocks() throws Exception {
         // Create trielogs for blocks 0, 1, 2, 10, 11, 12 (missing 3-9)
         setupDatabaseWithSelectedTrielogs(new long[]{0, 1, 2, 10, 11, 12});
 
         command.execute(new String[]{"0..12"});
 
         String output = outputStream.toString();
-        assertThat(output).contains("Missing ranges:");
-        assertThat(output).contains("3..9");
+        assertThat(output).contains("Missing trielog blocks:");
+        assertThat(output).contains("Block 3");
+        assertThat(output).contains("Block 4");
+        assertThat(output).contains("Block 9");
     }
 
     @Test
