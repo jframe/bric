@@ -130,10 +130,21 @@ public class TrieLogCompareCommand implements Command {
                 return;
             }
 
+            long totalBlocks = endBlock - startBlock + 1;
+            System.out.println("Comparing trielogs from block " + startBlock + " to " + endBlock + "...");
+
             // Compare each block in range
             List<TrieLogComparisonResult> results = new ArrayList<>();
+            long checkedBlocks = 0;
 
             for (long blockNum = startBlock; blockNum <= endBlock; blockNum++) {
+                checkedBlocks++;
+
+                // Show progress for large ranges (every 100 blocks)
+                if (checkedBlocks % 100 == 0 || checkedBlocks == totalBlocks) {
+                    System.out.println("Progress: " + checkedBlocks + "/" + totalBlocks + " blocks compared...");
+                }
+
                 Optional<TrieLogData> trieLogOpt = dbReader.readTrieLogByNumber(blockNum);
 
                 if (trieLogOpt.isEmpty()) {
