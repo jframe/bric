@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Bric is a command-line REPL tool for exploring Hyperledger Besu databases. It provides read-only access to Besu's RocksDB database, allowing users to query account data, storage slots, contract bytecode, and trie logs (state diffs).
+Bric (**B**esu **R**ocksDB **I**nteractive **C**ommand-line) is a command-line REPL tool for exploring Hyperledger Besu databases. It provides read-only access to Besu's RocksDB database, allowing users to query account data, storage slots, contract bytecode, and trie logs (state diffs).
 
 ## Build and Test Commands
 

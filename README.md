@@ -1,4 +1,6 @@
-# Bric - Besu Database Explorer REPL
+# Bric - Besu RocksDB Interactive Command-line
+
+**B**esu **R**ocksDB **I**nteractive **C**ommand-line
 
 A command-line REPL tool for exploring Hyperledger Besu databases. Query account data, storage slots, contract bytecode, and trie logs (state diffs) directly from Besu's RocksDB database.
 
