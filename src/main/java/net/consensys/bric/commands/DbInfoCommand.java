@@ -42,6 +42,12 @@ public class DbInfoCommand implements Command {
         for (String cfName : dbManager.getColumnFamilyNames()) {
             try {
                 DatabaseStats stats = dbManager.getStats(cfName);
+
+                // Skip empty columns (0 keys and 0 size)
+                if (stats.estimatedKeys == 0 && stats.getTotalSize() == 0) {
+                    continue;
+                }
+
                 allStats.add(stats);
 
                 String keysStr = stats.estimatedKeys >= 0
