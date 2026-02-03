@@ -330,6 +330,24 @@ public class BesuDatabaseReader {
     }
 
     /**
+     * Check if a trie log exists for a given block number without reading or decoding it.
+     * This is more efficient than readTrieLogByNumber when you only need to verify existence.
+     *
+     * @param blockNumber The block number
+     * @return true if the trie log exists, false otherwise
+     */
+    public boolean trieLogExists(long blockNumber) {
+        Optional<Hash> blockHash = readBlockHashByNumber(blockNumber);
+
+        if (blockHash.isEmpty()) {
+            return false;
+        }
+
+        // Use keyExists for maximum efficiency - no value retrieval
+        return segmentReader.keyExists(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE, blockHash.get());
+    }
+
+    /**
      * Check if the database is a Bonsai Archive database.
      * Logs a warning if the check fails.
      *

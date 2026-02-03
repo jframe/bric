@@ -51,6 +51,32 @@ public class SegmentReader {
     }
 
     /**
+     * Check if a key exists in a segment without retrieving the value.
+     * This is more efficient than get() when you only need to verify existence.
+     */
+    public boolean keyExists(KeyValueSegmentIdentifier segment, byte[] key) {
+        ColumnFamilyHandle cfHandle = dbManager.getColumnFamily(segment);
+        if (cfHandle == null) {
+            LOG.warn("Column family not found: {}", segment.getName());
+            return false;
+        }
+
+        try {
+            return dbManager.getDatabase().keyExists(cfHandle, key);
+        } catch (Exception e) {
+            LOG.error("Error checking key existence in segment {}: {}", segment.getName(), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Check if a key exists using Hash as key.
+     */
+    public boolean keyExists(KeyValueSegmentIdentifier segment, Hash key) {
+        return keyExists(segment, key.toArrayUnsafe());
+    }
+
+    /**
      * Find the nearest key-value pair where the key is lexicographically less than or equal to the search key.
      * This is used for archive databases where keys have block number suffixes.
      *
