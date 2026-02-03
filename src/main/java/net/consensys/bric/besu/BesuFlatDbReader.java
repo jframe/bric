@@ -7,6 +7,7 @@ import net.consensys.bric.db.StorageData;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.bouncycastle.util.Arrays;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -14,6 +15,7 @@ import org.apache.tuweni.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiArchiveFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFullFlatDbStrategy;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.BonsaiContext;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeHashCodeStorageStrategy;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
@@ -21,6 +23,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Optional;
+
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_ARCHIVE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiArchiveFlatDbStrategy.DELETED_STORAGE_VALUE;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiArchiveFlatDbStrategy.calculateArchiveKeyWithMaxSuffix;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiArchiveFlatDbStrategy.calculateNaturalSlotKey;
 
 /**
  * Wrapper that uses Besu's native FlatDbStrategy classes to read account and storage data.
@@ -194,9 +202,17 @@ public class BesuFlatDbReader {
 
             // Use getNearestBefore to find the account state at or before the specified block
             Optional<SegmentedKeyValueStorage.NearestKeyValue> result = storage.getNearestBefore(
-                    KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
+                    KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE,
                     searchKey
-            );
+            ).filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
+
+            // If there isn't a match look in the archive DB segment
+            if (result.isEmpty()) {
+                result = storage.getNearestBefore(
+                        KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
+                        searchKey
+                ).filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
+            }
 
             if (result.isEmpty() || result.get().value().isEmpty()) {
                 return Optional.empty();
@@ -259,9 +275,17 @@ public class BesuFlatDbReader {
 
             // Use getNearestBefore to find the account state at or before the specified block
             Optional<SegmentedKeyValueStorage.NearestKeyValue> result = storage.getNearestBefore(
-                    KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
+                    KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE,
                     searchKey
-            );
+            ).filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
+
+            // If there isn't a match look in the archive DB segment
+            if (result.isEmpty()) {
+                result = storage.getNearestBefore(
+                        KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
+                        searchKey
+                ).filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
+            }
 
             if (result.isEmpty() || result.get().value().isEmpty()) {
                 return Optional.empty();
@@ -345,8 +369,8 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Storage values are RLP-encoded and need to be decoded
-            UInt256 value = UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(storageBytes.get())));
+            // Storage values are stored as raw bytes
+            UInt256 value = UInt256.fromBytes(storageBytes.get());
 
             StorageData data = new StorageData();
             data.address = address;
@@ -403,8 +427,8 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Storage values are RLP-encoded and need to be decoded
-            UInt256 value = UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(storageBytes.get())));
+            // Storage values are stored as raw bytes
+            UInt256 value = UInt256.fromBytes(storageBytes.get());
 
             StorageData data = new StorageData();
             data.address = null;  // Not available from hash-only query
@@ -455,8 +479,8 @@ public class BesuFlatDbReader {
                 return Optional.empty();
             }
 
-            // Storage values are RLP-encoded and need to be decoded
-            UInt256 value = UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(storageBytes.get())));
+            // Storage values are stored as raw bytes
+            UInt256 value = UInt256.fromBytes(storageBytes.get());
 
             StorageData data = new StorageData();
             data.address = address;
@@ -491,22 +515,45 @@ public class BesuFlatDbReader {
         StorageSlotKey slotKey = new StorageSlotKey(slotHash, Optional.empty());
 
         try {
-            // Use Besu's archive strategy to read storage
-            Optional<Bytes> storageBytes = archiveStrategy.getFlatStorageValueByStorageSlotKey(
-                    Optional::empty,  // worldStateRootHashSupplier
-                    Optional::empty,  // storageRootSupplier
-                    null,  // nodeLoader (not needed for flat reads)
-                    accountHash,
-                    slotKey,
+            byte[] naturalKey = calculateNaturalSlotKey(accountHash, slotKey.getSlotHash());
+            // keyNearest, use MAX_BLOCK_SUFFIX in the absence of a block context:
+            Bytes keyNearest =
+                    calculateArchiveKeyWithMaxSuffix(Optional.of(new BonsaiContext(blockNumber)), naturalKey);
+
+            // Find the nearest storage for this address, slot key hash, and block context
+            Optional<SegmentedKeyValueStorage.NearestKeyValue> nearestKeyValue =
                     storage
-            );
+                            .getNearestBefore(ACCOUNT_STORAGE_STORAGE, keyNearest)
+                            .filter(
+                                    found -> Bytes.of(naturalKey).commonPrefixLength(found.key()) >= naturalKey.length);
+
+            // Fall back to archive segment if not found
+            if (nearestKeyValue.isEmpty()) {
+                nearestKeyValue =
+                        storage
+                                .getNearestBefore(ACCOUNT_STORAGE_ARCHIVE, keyNearest)
+                                .filter(
+                                        found -> Bytes.of(naturalKey).commonPrefixLength(found.key()) >= naturalKey.length);
+            }
+
+            if (nearestKeyValue.isEmpty()) {
+                return Optional.empty();
+            }
+
+            Optional<Bytes> storageBytes = nearestKeyValue
+                        // return empty when we find a "deleted value key"
+                        .filter(
+                                found ->
+                                        !Arrays.areEqual(
+                                                DELETED_STORAGE_VALUE, found.value().orElse(DELETED_STORAGE_VALUE)))
+                    .flatMap(SegmentedKeyValueStorage.NearestKeyValue::wrapBytes);
 
             if (storageBytes.isEmpty()) {
                 return Optional.empty();
             }
 
-            // Storage values are RLP-encoded and need to be decoded
-            UInt256 value = UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(storageBytes.get())));
+            // Storage values from direct access are already decoded (via wrapBytes)
+            UInt256 value = UInt256.fromBytes(storageBytes.get());
 
             StorageData data = new StorageData();
             data.address = null;  // Not available from hash-only query

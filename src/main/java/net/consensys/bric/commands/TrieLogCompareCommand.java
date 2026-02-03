@@ -292,7 +292,6 @@ public class TrieLogCompareCommand implements Command {
 
         for (Map.Entry<Address, Map<StorageSlotKey, PathBasedValue<UInt256>>> accountEntry : storageChanges.entrySet()) {
             Address address = accountEntry.getKey();
-            Hash accountHash = new SegmentReader(dbManager).computeAccountHash(address);
 
             for (Map.Entry<StorageSlotKey, PathBasedValue<UInt256>> slotEntry : accountEntry.getValue().entrySet()) {
                 Hash slotHash = slotEntry.getKey().getSlotHash();
@@ -308,7 +307,7 @@ public class TrieLogCompareCommand implements Command {
 
                 // Query storage archive
                 Optional<StorageData> archiveStorage =
-                    dbReader.readStorageByHashAtBlock(accountHash, slotHash, blockNumber);
+                    dbReader.readStorageByHashAtBlock(address.addressHash(), slotHash, blockNumber);
 
                 if (archiveStorage.isEmpty()) {
                     // Check if expected value is zero (might not be stored)

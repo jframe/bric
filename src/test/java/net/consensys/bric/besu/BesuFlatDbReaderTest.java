@@ -5,13 +5,11 @@ import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.KeyValueSegmentIdentifier;
 import net.consensys.bric.db.StorageData;
 import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiAccount;
-import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,12 +70,7 @@ class BesuFlatDbReaderTest {
     }
 
     private static byte[] generateStorageRLP() {
-        // Storage values are RLP-encoded as minimal bytes (no leading zeros)
-        Bytes storageBytes = TEST_STORAGE_VALUE.trimLeadingZeros();
-        if (storageBytes.size() == 0) {
-            return new byte[]{(byte) 0x80}; // RLP encoding of empty bytes
-        }
-        return RLP.encode(out -> out.writeBytes(storageBytes)).toArrayUnsafe();
+        return TEST_STORAGE_VALUE.toArrayUnsafe();
     }
 
     @BeforeEach
@@ -148,7 +141,11 @@ class BesuFlatDbReaderTest {
         List<ColumnFamilyDescriptor> columnFamilyDescriptors = new ArrayList<>();
         columnFamilyDescriptors.add(new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY));
         columnFamilyDescriptors.add(new ColumnFamilyDescriptor(
+                KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getId()));
+        columnFamilyDescriptors.add(new ColumnFamilyDescriptor(
                 KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE.getId()));
+        columnFamilyDescriptors.add(new ColumnFamilyDescriptor(
+                KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getId()));
         columnFamilyDescriptors.add(new ColumnFamilyDescriptor(
                 KeyValueSegmentIdentifier.ACCOUNT_STORAGE_ARCHIVE.getId()));
         columnFamilyDescriptors.add(new ColumnFamilyDescriptor(
@@ -163,7 +160,8 @@ class BesuFlatDbReaderTest {
         rocksDB = RocksDB.open(dbOptions, tempDir.toString(), columnFamilyDescriptors, columnFamilyHandles);
 
         // Write test account data with block number suffix using Besu-encoded RLP
-        ColumnFamilyHandle accountCf = columnFamilyHandles.get(1); // ACCOUNT_INFO_STATE_ARCHIVE
+        // Updated indices: 0=default, 1=ACCOUNT_INFO_STATE, 2=ACCOUNT_INFO_STATE_ARCHIVE, etc.
+        ColumnFamilyHandle accountCf = columnFamilyHandles.get(1); // ACCOUNT_INFO_STATE
         byte[] accountKey = Bytes.concatenate(
                 Bytes.wrap(TEST_ACCOUNT_HASH.toArrayUnsafe()),
                 Bytes.ofUnsignedLong(TEST_BLOCK_NUMBER)
@@ -171,7 +169,7 @@ class BesuFlatDbReaderTest {
         rocksDB.put(accountCf, accountKey, generateAccountRLP());
 
         // Write test storage data with block number suffix using Besu-encoded RLP
-        ColumnFamilyHandle storageCf = columnFamilyHandles.get(2); // ACCOUNT_STORAGE_ARCHIVE
+        ColumnFamilyHandle storageCf = columnFamilyHandles.get(3); // ACCOUNT_STORAGE_STORAGE
         byte[] storageKey = Bytes.concatenate(
                 Bytes.wrap(TEST_ACCOUNT_HASH.toArrayUnsafe()),
                 Bytes.wrap(TEST_SLOT_HASH.toArrayUnsafe()),
