@@ -76,8 +76,7 @@ public class BesuDatabaseReader {
      * @return Optional containing account data if found
      */
     public Optional<AccountData> readAccountByHashAtBlock(Hash accountHash, long blockNumber) {
-        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            LOG.warn("readAccountByHashAtBlock only supported for Bonsai Archive databases");
+        if (!isArchiveDatabase()) {
             return Optional.empty();
         }
 
@@ -173,8 +172,7 @@ public class BesuDatabaseReader {
      * @return Optional containing storage data if found
      */
     public Optional<StorageData> readStorageAtBlock(Address address, UInt256 slot, long blockNumber) {
-        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            LOG.warn("readStorageAtBlock only supported for Bonsai Archive databases");
+        if (!isArchiveDatabase()) {
             return Optional.empty();
         }
 
@@ -191,8 +189,7 @@ public class BesuDatabaseReader {
      * @return Optional containing storage data if found
      */
     public Optional<StorageData> readStorageByHashAtBlock(Hash accountHash, Hash slotHash, long blockNumber) {
-        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            LOG.warn("readStorageByHashAtBlock only supported for Bonsai Archive databases");
+        if (!isArchiveDatabase()) {
             return Optional.empty();
         }
 
@@ -330,5 +327,20 @@ public class BesuDatabaseReader {
         }
 
         return readTrieLog(blockHash.get());
+    }
+
+    /**
+     * Check if the database is a Bonsai Archive database.
+     * Logs a warning if the check fails.
+     *
+     * @return true if the database is Bonsai Archive, false otherwise
+     */
+    private boolean isArchiveDatabase() {
+        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
+            LOG.warn("Operation only supported for Bonsai Archive databases. Current format: {}",
+                    dbManager.getFormat());
+            return false;
+        }
+        return true;
     }
 }

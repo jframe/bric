@@ -5,13 +5,11 @@ import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.KeyValueSegmentIdentifier;
 import net.consensys.bric.db.StorageData;
 import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.bouncycastle.util.Arrays;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
-import org.apache.tuweni.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiArchiveFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFullFlatDbStrategy;
@@ -48,415 +46,42 @@ public class BesuFlatDbReader {
         this.dbManager = dbManager;
         this.storage = new RocksDBSegmentedStorage(dbManager);
 
-        // Initialize Besu's strategies with NoOpMetricsSystem from besu-metrics-core
-        NoOpMetricsSystem metricsSystem = new NoOpMetricsSystem();
-        CodeHashCodeStorageStrategy codeStrategy = new CodeHashCodeStorageStrategy();
-
+        final NoOpMetricsSystem metricsSystem = new NoOpMetricsSystem();
+        final CodeHashCodeStorageStrategy codeStrategy = new CodeHashCodeStorageStrategy();
         this.fullStrategy = new BonsaiFullFlatDbStrategy(metricsSystem, codeStrategy);
         this.archiveStrategy = new BonsaiArchiveFlatDbStrategy(metricsSystem, codeStrategy);
     }
 
-    /**
-     * Read current account data using Besu's FlatDbStrategy.
-     * Uses BonsaiFullFlatDbStrategy for regular Bonsai, BonsaiArchiveFlatDbStrategy for archive.
-     *
-     * @param address The account address
-     * @return Optional containing account data if found
-     */
     public Optional<AccountData> readAccount(Address address) {
-        if (!isBonsaiDatabase()) {
-            LOG.warn("readAccount only supported for Bonsai databases");
-            return Optional.empty();
-        }
-
-        Hash accountHash = Hash.hash(address);
-        boolean isArchive = dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
-
-        try {
-            Optional<Bytes> accountBytes = isArchive ?
-                    archiveStrategy.getFlatAccount(
-                            Optional::empty,  // worldStateRootHashSupplier
-                            null,  // nodeLoader (not needed for flat reads)
-                            accountHash,
-                            storage
-                    ) :
-                    fullStrategy.getFlatAccount(
-                            Optional::empty,  // worldStateRootHashSupplier
-                            null,  // nodeLoader (not needed for flat reads)
-                            accountHash,
-                            storage
-                    );
-
-            if (accountBytes.isEmpty()) {
-                return Optional.empty();
-            }
-
-            // Parse account value using Besu's BonsaiAccount.fromRLP()
-            BonsaiAccount account = BonsaiAccount.fromRLP(
-                    null,  // worldView - not needed for read-only
-                    address,
-                    accountBytes.get(),
-                    false,  // mutable = false (read-only)
-                    null   // codeCache - not needed for read-only
-            );
-
-            AccountData data = new AccountData();
-            data.address = address;
-            data.accountHash = accountHash;
-            data.nonce = account.getNonce();
-            data.balance = account.getBalance();
-            data.storageRoot = account.getStorageRoot();
-            data.codeHash = account.getCodeHash();
-            data.blockNumber = null;  // Current state, no specific block
-
-            return Optional.of(data);
-
-        } catch (Exception e) {
-            LOG.error("Failed to read account: {}", e.getMessage(), e);
-            return Optional.empty();
-        }
+        return readAccountInternal(Hash.hash(address), address);
     }
 
-    /**
-     * Read account by hash using Besu's FlatDbStrategy.
-     *
-     * @param accountHash The account hash
-     * @return Optional containing account data if found
-     */
     public Optional<AccountData> readAccountByHash(Hash accountHash) {
-        if (!isBonsaiDatabase()) {
-            LOG.warn("readAccountByHash only supported for Bonsai databases");
-            return Optional.empty();
-        }
-
-        boolean isArchive = dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
-
-        try {
-            Optional<Bytes> accountBytes = isArchive ?
-                    archiveStrategy.getFlatAccount(
-                            Optional::empty,  // worldStateRootHashSupplier
-                            null,  // nodeLoader (not needed for flat reads)
-                            accountHash,
-                            storage
-                    ) :
-                    fullStrategy.getFlatAccount(
-                            Optional::empty,  // worldStateRootHashSupplier
-                            null,  // nodeLoader (not needed for flat reads)
-                            accountHash,
-                            storage
-                    );
-
-            if (accountBytes.isEmpty()) {
-                return Optional.empty();
-            }
-
-            // Parse account value using Besu's BonsaiAccount.fromRLP()
-            // Note: We don't have the address, but BonsaiAccount.fromRLP requires it
-            // For hash-only queries, we'll need to pass a placeholder or handle this differently
-            BonsaiAccount account = BonsaiAccount.fromRLP(
-                    null,  // worldView - not needed for read-only
-                    Address.ZERO,  // placeholder since we don't have the actual address
-                    accountBytes.get(),
-                    false,  // mutable = false (read-only)
-                    null   // codeCache - not needed for read-only
-            );
-
-            AccountData data = new AccountData();
-            data.address = null;  // Not available from hash-only query
-            data.accountHash = accountHash;
-            data.nonce = account.getNonce();
-            data.balance = account.getBalance();
-            data.storageRoot = account.getStorageRoot();
-            data.codeHash = account.getCodeHash();
-            data.blockNumber = null;
-
-            return Optional.of(data);
-
-        } catch (Exception e) {
-            LOG.error("Failed to read account by hash: {}", e.getMessage(), e);
-            return Optional.empty();
-        }
+        return readAccountInternal(accountHash, null);
     }
 
-    /**
-     * Read account data at a specific block number using Besu's archive strategy.
-     *
-     * @param address The account address
-     * @param blockNumber The block number
-     * @return Optional containing account data if found
-     */
     public Optional<AccountData> readAccountAtBlock(Address address, long blockNumber) {
-        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            LOG.warn("readAccountAtBlock only supported for Bonsai Archive databases");
-            return Optional.empty();
-        }
-
-        Hash accountHash = Hash.hash(address);
-
-        try {
-            // Construct key with block number suffix: accountHash (32 bytes) + blockNumber (8 bytes)
-            Bytes searchKey = Bytes.concatenate(
-                    accountHash,
-                    Bytes.ofUnsignedLong(blockNumber)
-            );
-
-            // Use getNearestBefore to find the account state at or before the specified block
-            Optional<SegmentedKeyValueStorage.NearestKeyValue> result = storage.getNearestBefore(
-                    KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE,
-                    searchKey
-            ).filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
-
-            // If there isn't a match look in the archive DB segment
-            if (result.isEmpty()) {
-                result = storage.getNearestBefore(
-                        KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
-                        searchKey
-                ).filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
-            }
-
-            if (result.isEmpty() || result.get().value().isEmpty()) {
-                return Optional.empty();
-            }
-
-            Bytes returnedKey = result.get().key();
-            byte[] accountBytes = result.get().value().get();
-
-            // Parse account value using Besu's BonsaiAccount.fromRLP()
-            BonsaiAccount account = BonsaiAccount.fromRLP(
-                    null,  // worldView - not needed for read-only
-                    address,
-                    Bytes.wrap(accountBytes),
-                    false,  // mutable = false (read-only)
-                    null   // codeCache - not needed for read-only
-            );
-
-            // Extract actual block number from the returned key (last 8 bytes)
-            Long actualBlockNumber = null;
-            if (returnedKey.size() >= 40) {
-                actualBlockNumber = returnedKey.slice(32, 8).toLong();
-            }
-
-            AccountData data = new AccountData();
-            data.address = address;
-            data.accountHash = accountHash;
-            data.nonce = account.getNonce();
-            data.balance = account.getBalance();
-            data.storageRoot = account.getStorageRoot();
-            data.codeHash = account.getCodeHash();
-            data.blockNumber = actualBlockNumber;
-
-            return Optional.of(data);
-
-        } catch (Exception e) {
-            LOG.error("Failed to read account from archive: {}", e.getMessage(), e);
-            return Optional.empty();
-        }
+        return readAccountAtBlockInternal(Hash.hash(address), address, blockNumber);
     }
 
-    /**
-     * Read account data by hash at a specific block number using Besu's archive strategy.
-     *
-     * @param accountHash The account hash
-     * @param blockNumber The block number
-     * @return Optional containing account data if found
-     */
     public Optional<AccountData> readAccountByHashAtBlock(Hash accountHash, long blockNumber) {
-        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            LOG.warn("readAccountByHashAtBlock only supported for Bonsai Archive databases");
-            return Optional.empty();
-        }
-
-        try {
-            // Construct key with block number suffix: accountHash (32 bytes) + blockNumber (8 bytes)
-            Bytes searchKey = Bytes.concatenate(
-                    accountHash,
-                    Bytes.ofUnsignedLong(blockNumber)
-            );
-
-            // Use getNearestBefore to find the account state at or before the specified block
-            Optional<SegmentedKeyValueStorage.NearestKeyValue> result = storage.getNearestBefore(
-                    KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE,
-                    searchKey
-            ).filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
-
-            // If there isn't a match look in the archive DB segment
-            if (result.isEmpty()) {
-                result = storage.getNearestBefore(
-                        KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
-                        searchKey
-                ).filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
-            }
-
-            if (result.isEmpty() || result.get().value().isEmpty()) {
-                return Optional.empty();
-            }
-
-            Bytes returnedKey = result.get().key();
-            byte[] accountBytes = result.get().value().get();
-
-            // Parse account value using Besu's BonsaiAccount.fromRLP()
-            // Note: We don't have the address, but BonsaiAccount.fromRLP requires it
-            // For hash-only queries, we'll need to pass a placeholder or handle this differently
-            BonsaiAccount account = BonsaiAccount.fromRLP(
-                    null,  // worldView - not needed for read-only
-                    Address.ZERO,  // placeholder since we don't have the actual address
-                    Bytes.wrap(accountBytes),
-                    false,  // mutable = false (read-only)
-                    null   // codeCache - not needed for read-only
-            );
-
-            // Extract actual block number from the returned key (last 8 bytes)
-            Long actualBlockNumber = null;
-            if (returnedKey.size() >= 40) {
-                actualBlockNumber = returnedKey.slice(32, 8).toLong();
-            }
-
-            AccountData data = new AccountData();
-            data.address = null;  // Not available from hash-only query
-            data.accountHash = accountHash;
-            data.nonce = account.getNonce();
-            data.balance = account.getBalance();
-            data.storageRoot = account.getStorageRoot();
-            data.codeHash = account.getCodeHash();
-            data.blockNumber = actualBlockNumber;
-
-            return Optional.of(data);
-
-        } catch (Exception e) {
-            LOG.error("Failed to read account by hash from archive: {}", e.getMessage(), e);
-            return Optional.empty();
-        }
+        return readAccountAtBlockInternal(accountHash, null, blockNumber);
     }
 
-    /**
-     * Read current storage slot value using Besu's FlatDbStrategy.
-     *
-     * @param address The contract address
-     * @param slot The storage slot
-     * @return Optional containing storage data if found
-     */
     public Optional<StorageData> readStorage(Address address, UInt256 slot) {
-        if (!isBonsaiDatabase()) {
-            LOG.warn("readStorage only supported for Bonsai databases");
-            return Optional.empty();
-        }
-
         Hash accountHash = Hash.hash(address);
         Hash slotHash = Hash.hash(slot);
         StorageSlotKey slotKey = new StorageSlotKey(slotHash, Optional.of(slot));
-        boolean isArchive = dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
-
-        try {
-            Optional<Bytes> storageBytes = isArchive ?
-                    archiveStrategy.getFlatStorageValueByStorageSlotKey(
-                            Optional::empty,  // worldStateRootHashSupplier
-                            Optional::empty,  // storageRootSupplier
-                            null,  // nodeLoader (not needed for flat reads)
-                            accountHash,
-                            slotKey,
-                            storage
-                    ) :
-                    fullStrategy.getFlatStorageValueByStorageSlotKey(
-                            Optional::empty,  // worldStateRootHashSupplier
-                            Optional::empty,  // storageRootSupplier
-                            null,  // nodeLoader (not needed for flat reads)
-                            accountHash,
-                            slotKey,
-                            storage
-                    );
-
-            if (storageBytes.isEmpty()) {
-                return Optional.empty();
-            }
-
-            // Storage values are stored as raw bytes
-            UInt256 value = UInt256.fromBytes(storageBytes.get());
-
-            StorageData data = new StorageData();
-            data.address = address;
-            data.slot = slot;
-            data.accountHash = accountHash;
-            data.slotHash = slotHash;
-            data.value = value;
-            data.blockNumber = null;
-
-            return Optional.of(data);
-
-        } catch (Exception e) {
-            LOG.debug("Failed to read storage: {}", e.getMessage());
-            return Optional.empty();
-        }
+        return readStorageInternal(accountHash, slotKey, address, slot);
     }
 
-    /**
-     * Read current storage slot by hashes using Besu's FlatDbStrategy.
-     *
-     * @param accountHash The account hash
-     * @param slotHash The slot hash
-     * @return Optional containing storage data if found
-     */
     public Optional<StorageData> readStorageByHash(Hash accountHash, Hash slotHash) {
-        if (!isBonsaiDatabase()) {
-            LOG.warn("readStorageByHash only supported for Bonsai databases");
-            return Optional.empty();
-        }
-
         StorageSlotKey slotKey = new StorageSlotKey(slotHash, Optional.empty());
-        boolean isArchive = dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
-
-        try {
-            Optional<Bytes> storageBytes = isArchive ?
-                    archiveStrategy.getFlatStorageValueByStorageSlotKey(
-                            Optional::empty,  // worldStateRootHashSupplier
-                            Optional::empty,  // storageRootSupplier
-                            null,  // nodeLoader (not needed for flat reads)
-                            accountHash,
-                            slotKey,
-                            storage
-                    ) :
-                    fullStrategy.getFlatStorageValueByStorageSlotKey(
-                            Optional::empty,  // worldStateRootHashSupplier
-                            Optional::empty,  // storageRootSupplier
-                            null,  // nodeLoader (not needed for flat reads)
-                            accountHash,
-                            slotKey,
-                            storage
-                    );
-
-            if (storageBytes.isEmpty()) {
-                return Optional.empty();
-            }
-
-            // Storage values are stored as raw bytes
-            UInt256 value = UInt256.fromBytes(storageBytes.get());
-
-            StorageData data = new StorageData();
-            data.address = null;  // Not available from hash-only query
-            data.slot = null;  // Not available from hash-only query
-            data.accountHash = accountHash;
-            data.slotHash = slotHash;
-            data.value = value;
-            data.blockNumber = null;
-
-            return Optional.of(data);
-
-        } catch (Exception e) {
-            LOG.debug("Failed to read storage by hash: {}", e.getMessage());
-            return Optional.empty();
-        }
+        return readStorageInternal(accountHash, slotKey, null, null);
     }
 
-    /**
-     * Read storage slot value at a specific block number using Besu's archive strategy.
-     *
-     * @param address The contract address
-     * @param slot The storage slot
-     * @param blockNumber The block number
-     * @return Optional containing storage data if found
-     */
     public Optional<StorageData> readStorageAtBlock(Address address, UInt256 slot, long blockNumber) {
-        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            LOG.warn("readStorageAtBlock only supported for Bonsai Archive databases");
+        if (!isArchiveDatabase()) {
             return Optional.empty();
         }
 
@@ -465,32 +90,15 @@ public class BesuFlatDbReader {
         StorageSlotKey slotKey = new StorageSlotKey(slotHash, Optional.of(slot));
 
         try {
-            // Use Besu's archive strategy to read storage
             Optional<Bytes> storageBytes = archiveStrategy.getFlatStorageValueByStorageSlotKey(
-                    Optional::empty,  // worldStateRootHashSupplier
-                    Optional::empty,  // storageRootSupplier
-                    null,  // nodeLoader (not needed for flat reads)
-                    accountHash,
-                    slotKey,
-                    storage
-            );
+                    Optional::empty, Optional::empty, null, accountHash, slotKey, storage);
 
             if (storageBytes.isEmpty()) {
                 return Optional.empty();
             }
 
-            // Storage values are stored as raw bytes
             UInt256 value = UInt256.fromBytes(storageBytes.get());
-
-            StorageData data = new StorageData();
-            data.address = address;
-            data.slot = slot;
-            data.accountHash = accountHash;
-            data.slotHash = slotHash;
-            data.value = value;
-            data.blockNumber = blockNumber;
-
-            return Optional.of(data);
+            return Optional.of(createStorageData(accountHash, slotHash, value, address, slot, blockNumber));
 
         } catch (Exception e) {
             LOG.debug("Failed to read storage from archive: {}", e.getMessage());
@@ -498,17 +106,8 @@ public class BesuFlatDbReader {
         }
     }
 
-    /**
-     * Read storage slot by raw hashes at a specific block number.
-     *
-     * @param accountHash The account hash
-     * @param slotHash The slot hash
-     * @param blockNumber The block number
-     * @return Optional containing storage data if found
-     */
     public Optional<StorageData> readStorageByHashAtBlock(Hash accountHash, Hash slotHash, long blockNumber) {
-        if (dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
-            LOG.warn("readStorageByHashAtBlock only supported for Bonsai Archive databases");
+        if (!isArchiveDatabase()) {
             return Optional.empty();
         }
 
@@ -516,24 +115,17 @@ public class BesuFlatDbReader {
 
         try {
             byte[] naturalKey = calculateNaturalSlotKey(accountHash, slotKey.getSlotHash());
-            // keyNearest, use MAX_BLOCK_SUFFIX in the absence of a block context:
-            Bytes keyNearest =
-                    calculateArchiveKeyWithMaxSuffix(Optional.of(new BonsaiContext(blockNumber)), naturalKey);
+            Bytes keyNearest = calculateArchiveKeyWithMaxSuffix(
+                    Optional.of(new BonsaiContext(blockNumber)), naturalKey);
 
-            // Find the nearest storage for this address, slot key hash, and block context
+            // Find the nearest storage with fallback
             Optional<SegmentedKeyValueStorage.NearestKeyValue> nearestKeyValue =
-                    storage
-                            .getNearestBefore(ACCOUNT_STORAGE_STORAGE, keyNearest)
-                            .filter(
-                                    found -> Bytes.of(naturalKey).commonPrefixLength(found.key()) >= naturalKey.length);
+                    storage.getNearestBefore(ACCOUNT_STORAGE_STORAGE, keyNearest)
+                            .filter(found -> Bytes.of(naturalKey).commonPrefixLength(found.key()) >= naturalKey.length);
 
-            // Fall back to archive segment if not found
             if (nearestKeyValue.isEmpty()) {
-                nearestKeyValue =
-                        storage
-                                .getNearestBefore(ACCOUNT_STORAGE_ARCHIVE, keyNearest)
-                                .filter(
-                                        found -> Bytes.of(naturalKey).commonPrefixLength(found.key()) >= naturalKey.length);
+                nearestKeyValue = storage.getNearestBefore(ACCOUNT_STORAGE_ARCHIVE, keyNearest)
+                        .filter(found -> Bytes.of(naturalKey).commonPrefixLength(found.key()) >= naturalKey.length);
             }
 
             if (nearestKeyValue.isEmpty()) {
@@ -541,29 +133,16 @@ public class BesuFlatDbReader {
             }
 
             Optional<Bytes> storageBytes = nearestKeyValue
-                        // return empty when we find a "deleted value key"
-                        .filter(
-                                found ->
-                                        !Arrays.areEqual(
-                                                DELETED_STORAGE_VALUE, found.value().orElse(DELETED_STORAGE_VALUE)))
+                    .filter(found -> !Arrays.areEqual(DELETED_STORAGE_VALUE,
+                            found.value().orElse(DELETED_STORAGE_VALUE)))
                     .flatMap(SegmentedKeyValueStorage.NearestKeyValue::wrapBytes);
 
             if (storageBytes.isEmpty()) {
                 return Optional.empty();
             }
 
-            // Storage values from direct access are already decoded (via wrapBytes)
             UInt256 value = UInt256.fromBytes(storageBytes.get());
-
-            StorageData data = new StorageData();
-            data.address = null;  // Not available from hash-only query
-            data.slot = null;  // Not available from hash-only query
-            data.accountHash = accountHash;
-            data.slotHash = slotHash;
-            data.value = value;
-            data.blockNumber = blockNumber;
-
-            return Optional.of(data);
+            return Optional.of(createStorageData(accountHash, slotHash, value, null, null, blockNumber));
 
         } catch (Exception e) {
             LOG.debug("Failed to read storage by hash from archive: {}", e.getMessage());
@@ -571,12 +150,157 @@ public class BesuFlatDbReader {
         }
     }
 
-    /**
-     * Helper method to check if the database is a Bonsai database (regular or archive).
-     */
+    private Optional<AccountData> readAccountInternal(Hash accountHash, Address address) {
+        if (!isBonsaiDatabase()) {
+            LOG.warn("Account reading only supported for Bonsai databases");
+            return Optional.empty();
+        }
+
+        try {
+            Optional<Bytes> accountBytes = isArchive() ?
+                    archiveStrategy.getFlatAccount(Optional::empty, null, accountHash, storage) :
+                    fullStrategy.getFlatAccount(Optional::empty, null, accountHash, storage);
+
+            if (accountBytes.isEmpty()) {
+                return Optional.empty();
+            }
+
+            BonsaiAccount account = parseBonsaiAccount(accountBytes.get(), address);
+            return Optional.of(createAccountData(account, accountHash, address, null));
+
+        } catch (Exception e) {
+            LOG.error("Failed to read account: {}", e.getMessage(), e);
+            return Optional.empty();
+        }
+    }
+
+    private Optional<AccountData> readAccountAtBlockInternal(
+            Hash accountHash, Address address, long blockNumber) {
+
+        if (!isArchiveDatabase()) {
+            return Optional.empty();
+        }
+
+        try {
+            Bytes searchKey = Bytes.concatenate(accountHash, Bytes.ofUnsignedLong(blockNumber));
+
+            // Try ACCOUNT_INFO_STATE first, then fallback to ACCOUNT_INFO_STATE_ARCHIVE
+            Optional<SegmentedKeyValueStorage.NearestKeyValue> result =
+                    findNearestAccountKey(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE, searchKey, accountHash);
+
+            if (result.isEmpty()) {
+                result = findNearestAccountKey(
+                        KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE, searchKey, accountHash);
+            }
+
+            if (result.isEmpty() || result.get().value().isEmpty()) {
+                return Optional.empty();
+            }
+
+            Bytes returnedKey = result.get().key();
+            byte[] accountBytes = result.get().value().get();
+
+            BonsaiAccount account = parseBonsaiAccount(Bytes.wrap(accountBytes), address);
+            Long actualBlockNumber = extractBlockNumber(returnedKey);
+
+            return Optional.of(createAccountData(account, accountHash, address, actualBlockNumber));
+
+        } catch (Exception e) {
+            LOG.error("Failed to read account from archive: {}", e.getMessage(), e);
+            return Optional.empty();
+        }
+    }
+
+    private Optional<StorageData> readStorageInternal(
+            Hash accountHash, StorageSlotKey slotKey, Address address, UInt256 slot) {
+
+        if (!isBonsaiDatabase()) {
+            LOG.warn("Storage reading only supported for Bonsai databases");
+            return Optional.empty();
+        }
+
+        try {
+            Optional<Bytes> storageBytes = isArchive() ?
+                    archiveStrategy.getFlatStorageValueByStorageSlotKey(
+                            Optional::empty, Optional::empty, null, accountHash, slotKey, storage) :
+                    fullStrategy.getFlatStorageValueByStorageSlotKey(
+                            Optional::empty, Optional::empty, null, accountHash, slotKey, storage);
+
+            if (storageBytes.isEmpty()) {
+                return Optional.empty();
+            }
+
+            UInt256 value = UInt256.fromBytes(storageBytes.get());
+            return Optional.of(createStorageData(
+                    accountHash, slotKey.getSlotHash(), value, address, slot, null));
+
+        } catch (Exception e) {
+            LOG.debug("Failed to read storage: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private Optional<SegmentedKeyValueStorage.NearestKeyValue> findNearestAccountKey(
+            KeyValueSegmentIdentifier segment, Bytes searchKey, Hash accountHash) {
+
+        return storage.getNearestBefore(segment, searchKey)
+                .filter(found -> accountHash.commonPrefixLength(found.key()) >= accountHash.size());
+    }
+
+    private BonsaiAccount parseBonsaiAccount(Bytes accountBytes, Address address) {
+        Address addressToUse = address != null ? address : Address.ZERO;
+        return BonsaiAccount.fromRLP(null, addressToUse, accountBytes, false, null);
+    }
+
+    private AccountData createAccountData(
+            BonsaiAccount account, Hash accountHash, Address address, Long blockNumber) {
+        AccountData data = new AccountData();
+        data.address = address;
+        data.accountHash = accountHash;
+        data.nonce = account.getNonce();
+        data.balance = account.getBalance();
+        data.storageRoot = account.getStorageRoot();
+        data.codeHash = account.getCodeHash();
+        data.blockNumber = blockNumber;
+        return data;
+    }
+
+    private StorageData createStorageData(
+            Hash accountHash, Hash slotHash, UInt256 value,
+            Address address, UInt256 slot, Long blockNumber) {
+        StorageData data = new StorageData();
+        data.address = address;
+        data.slot = slot;
+        data.accountHash = accountHash;
+        data.slotHash = slotHash;
+        data.value = value;
+        data.blockNumber = blockNumber;
+        return data;
+    }
+
+    private Long extractBlockNumber(Bytes key) {
+        if (key.size() >= 40) {
+            return key.slice(32, 8).toLong();
+        }
+        return null;
+    }
+
+    private boolean isArchive() {
+        return dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
+    }
+
     private boolean isBonsaiDatabase() {
         BesuDatabaseManager.DatabaseFormat format = dbManager.getFormat();
         return format == BesuDatabaseManager.DatabaseFormat.BONSAI ||
                format == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
+    }
+
+    private boolean isArchiveDatabase() {
+        if (!isArchive()) {
+            LOG.warn("Operation only supported for Bonsai Archive databases. Current format: {}",
+                    dbManager.getFormat());
+            return false;
+        }
+        return true;
     }
 }
