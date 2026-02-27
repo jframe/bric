@@ -100,7 +100,7 @@ public class BesuFlatDbReader {
             UInt256 value = UInt256.fromBytes(storageBytes.get());
             return Optional.of(createStorageData(accountHash, slotHash, value, address, slot, blockNumber));
 
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             LOG.debug("Failed to read storage from archive: {}", e.getMessage());
             return Optional.empty();
         }
@@ -144,7 +144,7 @@ public class BesuFlatDbReader {
             UInt256 value = UInt256.fromBytes(storageBytes.get());
             return Optional.of(createStorageData(accountHash, slotHash, value, null, null, blockNumber));
 
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             LOG.debug("Failed to read storage by hash from archive: {}", e.getMessage());
             return Optional.empty();
         }
@@ -168,7 +168,7 @@ public class BesuFlatDbReader {
             BonsaiAccount account = parseBonsaiAccount(accountBytes.get(), address);
             return Optional.of(createAccountData(account, accountHash, address, null));
 
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             LOG.error("Failed to read account: {}", e.getMessage(), e);
             return Optional.empty();
         }
@@ -205,7 +205,7 @@ public class BesuFlatDbReader {
 
             return Optional.of(createAccountData(account, accountHash, address, actualBlockNumber));
 
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             LOG.error("Failed to read account from archive: {}", e.getMessage(), e);
             return Optional.empty();
         }
@@ -234,7 +234,7 @@ public class BesuFlatDbReader {
             return Optional.of(createStorageData(
                     accountHash, slotKey.getSlotHash(), value, address, slot, null));
 
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             LOG.debug("Failed to read storage: {}", e.getMessage());
             return Optional.empty();
         }
