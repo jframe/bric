@@ -48,7 +48,7 @@ public class AccountCommand implements Command {
 
                 // Check if it's a block hash (0x + 64 hex chars) or block number
                 if (blockValue.startsWith("0x") && blockValue.length() == 66) {
-                    blockHash = Optional.of(parseBlockHash(blockValue));
+                    blockHash = Optional.of(InputParser.parseHash(blockValue, "block hash"));
                 } else {
                     try {
                         blockNumber = Optional.of(Long.parseLong(blockValue));
@@ -86,14 +86,14 @@ public class AccountCommand implements Command {
             }
 
             if (isHashQuery) {
-                Hash accountHash = parseHash(addressOrHash);
+                Hash accountHash = InputParser.parseHash(addressOrHash);
                 if (blockNumber.isPresent()) {
                     accountData = dbReader.readAccountByHashAtBlock(accountHash, blockNumber.get());
                 } else {
                     accountData = dbReader.readAccountByHash(accountHash);
                 }
             } else {
-                Address address = parseAddress(addressOrHash);
+                Address address = InputParser.parseAddress(addressOrHash);
                 if (blockNumber.isPresent()) {
                     accountData = dbReader.readAccountAtBlock(address, blockNumber.get());
                 } else {
@@ -118,63 +118,6 @@ public class AccountCommand implements Command {
         } catch (Exception e) {
             System.err.println("Error querying account: " + e.getMessage());
         }
-    }
-
-    /**
-     * Parse and validate Ethereum address.
-     */
-    private Address parseAddress(String addressStr) {
-        if (!addressStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid address format. Expected: 0x-prefixed hex (40 chars). Got: " + addressStr
-            );
-        }
-
-        if (addressStr.length() != 42) {
-            throw new IllegalArgumentException(
-                "Invalid address length. Expected: 42 chars (0x + 40 hex). Got: " + addressStr.length()
-            );
-        }
-
-        try {
-            return Address.fromHexString(addressStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid address format: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Parse and validate 32-byte hash.
-     */
-    private Hash parseHash(String hashStr) {
-        if (!hashStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid hash format. Expected: 0x-prefixed hex (64 chars). Got: " + hashStr
-            );
-        }
-
-        if (hashStr.length() != 66) {
-            throw new IllegalArgumentException(
-                "Invalid hash length. Expected: 66 chars (0x + 64 hex). Got: " + hashStr.length()
-            );
-        }
-
-        try {
-            return Hash.fromHexString(hashStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid hash format: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Parse and validate block hash.
-     */
-    private Hash parseBlockHash(String hashStr) {
-        return parseHash(hashStr);
     }
 
     @Override

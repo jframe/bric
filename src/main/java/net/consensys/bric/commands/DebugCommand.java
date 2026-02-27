@@ -11,7 +11,6 @@ import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 
-import java.math.BigInteger;
 import java.util.Optional;
 
 /**
@@ -88,7 +87,7 @@ public class DebugCommand implements Command {
 
     private void debugAccount(String addressStr, Optional<Long> blockNumber) {
         try {
-            Address address = parseAddress(addressStr);
+            Address address = InputParser.parseAddress(addressStr);
             Hash accountHash = Hash.hash(address);
             boolean isArchive = dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
 
@@ -205,8 +204,8 @@ public class DebugCommand implements Command {
 
     private void debugStorage(String addressStr, String slotStr, Optional<Long> blockNumber) {
         try {
-            Address address = parseAddress(addressStr);
-            UInt256 slot = parseSlot(slotStr);
+            Address address = InputParser.parseAddress(addressStr);
+            UInt256 slot = InputParser.parseSlot(slotStr);
             Hash accountHash = Hash.hash(address);
             Hash slotHash = Hash.hash(slot);
             boolean isArchive = dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
@@ -321,60 +320,6 @@ public class DebugCommand implements Command {
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
-        }
-    }
-
-    private Address parseAddress(String addressStr) {
-        if (!addressStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid address format. Expected: 0x-prefixed hex (40 chars). Got: " + addressStr
-            );
-        }
-
-        if (addressStr.length() != 42) {
-            throw new IllegalArgumentException(
-                "Invalid address length. Expected: 42 chars (0x + 40 hex). Got: " + addressStr.length()
-            );
-        }
-
-        try {
-            return Address.fromHexString(addressStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid address format: " + e.getMessage()
-            );
-        }
-    }
-
-    private UInt256 parseSlot(String slotStr) {
-        try {
-            if (slotStr.startsWith("0x") || slotStr.startsWith("0X")) {
-                return UInt256.fromHexString(slotStr);
-            } else {
-                // Decimal format - use BigInteger to support full 256-bit range
-                BigInteger value = new BigInteger(slotStr);
-                if (value.signum() < 0) {
-                    throw new IllegalArgumentException(
-                        "Slot number cannot be negative: " + slotStr
-                    );
-                }
-                if (value.bitLength() > 256) {
-                    throw new IllegalArgumentException(
-                        "Slot number exceeds 256 bits: " + slotStr
-                    );
-                }
-                return UInt256.valueOf(value);
-            }
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                "Invalid slot format. Expected: decimal number or 0x-prefixed hex. Got: " + slotStr
-            );
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid slot value: " + e.getMessage()
-            );
         }
     }
 

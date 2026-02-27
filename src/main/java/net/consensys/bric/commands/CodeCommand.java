@@ -64,10 +64,10 @@ public class CodeCommand implements Command {
             Optional<CodeData> codeData;
 
             if (isHashQuery) {
-                Hash codeHash = parseHash(addressOrHash);
+                Hash codeHash = InputParser.parseHash(addressOrHash);
                 codeData = dbReader.readCodeByHash(codeHash);
             } else {
-                Address address = parseAddress(addressOrHash);
+                Address address = InputParser.parseAddress(addressOrHash);
                 codeData = dbReader.readCode(address);
             }
 
@@ -109,56 +109,6 @@ public class CodeCommand implements Command {
 
         String bytecodeHex = formatter.toBytecodeHex(code);
         Files.writeString(path, bytecodeHex);
-    }
-
-    /**
-     * Parse and validate Ethereum address.
-     */
-    private Address parseAddress(String addressStr) {
-        if (!addressStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid address format. Expected: 0x-prefixed hex (40 chars). Got: " + addressStr
-            );
-        }
-
-        if (addressStr.length() != 42) {
-            throw new IllegalArgumentException(
-                "Invalid address length. Expected: 42 chars (0x + 40 hex). Got: " + addressStr.length()
-            );
-        }
-
-        try {
-            return Address.fromHexString(addressStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid address format: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Parse and validate 32-byte hash.
-     */
-    private Hash parseHash(String hashStr) {
-        if (!hashStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid hash format. Expected: 0x-prefixed hex (64 chars). Got: " + hashStr
-            );
-        }
-
-        if (hashStr.length() != 66) {
-            throw new IllegalArgumentException(
-                "Invalid hash length. Expected: 66 chars (0x + 64 hex). Got: " + hashStr.length()
-            );
-        }
-
-        try {
-            return Hash.fromHexString(hashStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid hash format: " + e.getMessage()
-            );
-        }
     }
 
     @Override

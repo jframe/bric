@@ -8,7 +8,6 @@ import net.consensys.bric.formatters.StorageFormatter;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 
-import java.math.BigInteger;
 import java.util.Optional;
 
 /**
@@ -43,7 +42,7 @@ public class StorageCommand implements Command {
         String secondArg = args[1];
 
         // Check if this is a raw hash query
-        boolean isRawQuery = hasFlag(args, "--raw");
+        boolean isRawQuery = InputParser.hasFlag(args, "--raw");
 
         // Parse optional --block parameter
         Optional<Long> blockNumber = Optional.empty();
@@ -52,7 +51,7 @@ public class StorageCommand implements Command {
             if ("--block".equals(args[i]) && i + 1 < args.length) {
                 String blockValue = args[i + 1];
                 if (blockValue.startsWith("0x") && blockValue.length() == 66) {
-                    blockHash = Optional.of(parseBlockHash(blockValue));
+                    blockHash = Optional.of(InputParser.parseHash(blockValue, "block hash"));
                 } else {
                     try {
                         blockNumber = Optional.of(Long.parseLong(blockValue));
@@ -87,16 +86,16 @@ public class StorageCommand implements Command {
             Optional<StorageData> storageData;
 
             if (isRawQuery) {
-                Hash accountHash = parseHash(firstArg, "account hash");
-                Hash slotHash = parseHash(secondArg, "slot hash");
+                Hash accountHash = InputParser.parseHash(firstArg, "account hash");
+                Hash slotHash = InputParser.parseHash(secondArg, "slot hash");
                 if (blockNumber.isPresent()) {
                     storageData = dbReader.readStorageByHashAtBlock(accountHash, slotHash, blockNumber.get());
                 } else {
                     storageData = dbReader.readStorageByHash(accountHash, slotHash);
                 }
             } else {
-                Address address = parseAddress(firstArg);
-                UInt256 slot = parseSlot(secondArg);
+                Address address = InputParser.parseAddress(firstArg);
+                UInt256 slot = InputParser.parseSlot(secondArg);
                 if (blockNumber.isPresent()) {
                     storageData = dbReader.readStorageAtBlock(address, slot, blockNumber.get());
                 } else {
@@ -123,111 +122,6 @@ public class StorageCommand implements Command {
         } catch (Exception e) {
             System.err.println("Error querying storage: " + e.getMessage());
         }
-    }
-
-    /**
-     * Parse and validate Ethereum address.
-     */
-    private Address parseAddress(String addressStr) {
-        if (!addressStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid address format. Expected: 0x-prefixed hex (40 chars). Got: " + addressStr
-            );
-        }
-
-        if (addressStr.length() != 42) {
-            throw new IllegalArgumentException(
-                "Invalid address length. Expected: 42 chars (0x + 40 hex). Got: " + addressStr.length()
-            );
-        }
-
-        try {
-            return Address.fromHexString(addressStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid address format: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Parse storage slot - accepts decimal or hex format.
-     */
-    private UInt256 parseSlot(String slotStr) {
-        try {
-            if (slotStr.startsWith("0x") || slotStr.startsWith("0X")) {
-                // Hex format
-                return UInt256.fromHexString(slotStr);
-            } else {
-                // Decimal format - use BigInteger to support full 256-bit range
-                BigInteger value = new BigInteger(slotStr);
-                if (value.signum() < 0) {
-                    throw new IllegalArgumentException(
-                        "Slot number cannot be negative: " + slotStr
-                    );
-                }
-                if (value.bitLength() > 256) {
-                    throw new IllegalArgumentException(
-                        "Slot number exceeds 256 bits: " + slotStr
-                    );
-                }
-                return UInt256.valueOf(value);
-            }
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                "Invalid slot format. Expected: decimal number or 0x-prefixed hex. Got: " + slotStr
-            );
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid slot value: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Parse and validate 32-byte hash.
-     */
-    private Hash parseHash(String hashStr, String fieldName) {
-        if (!hashStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid " + fieldName + " format. Expected: 0x-prefixed hex (64 chars). Got: " + hashStr
-            );
-        }
-
-        if (hashStr.length() != 66) {
-            throw new IllegalArgumentException(
-                "Invalid " + fieldName + " length. Expected: 66 chars (0x + 64 hex). Got: " + hashStr.length()
-            );
-        }
-
-        try {
-            return Hash.fromHexString(hashStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid " + fieldName + " format: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Parse and validate block hash.
-     */
-    private Hash parseBlockHash(String hashStr) {
-        return parseHash(hashStr, "block hash");
-    }
-
-    /**
-     * Check if a flag is present anywhere in the args array.
-     */
-    private boolean hasFlag(String[] args, String flag) {
-        for (String arg : args) {
-            if (flag.equals(arg)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     @Override

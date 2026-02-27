@@ -43,7 +43,7 @@ public class TrieLogCommand implements Command {
         Optional<Address> addressFilter = Optional.empty();
         for (int i = 1; i < args.length; i++) {
             if ("--address".equals(args[i]) && i + 1 < args.length) {
-                addressFilter = Optional.of(parseAddress(args[i + 1]));
+                addressFilter = Optional.of(InputParser.parseAddress(args[i + 1]));
                 break;
             }
         }
@@ -52,8 +52,8 @@ public class TrieLogCommand implements Command {
             Optional<TrieLogData> trieLog;
 
             // Detect if input is a block number (numeric) or block hash (0x-prefixed hex)
-            if (isBlockNumber(blockIdentifier)) {
-                long blockNumber = parseBlockNumber(blockIdentifier);
+            if (InputParser.isBlockNumber(blockIdentifier)) {
+                long blockNumber = InputParser.parseBlockNumber(blockIdentifier);
                 trieLog = dbReader.readTrieLogByNumber(blockNumber);
 
                 if (trieLog.isEmpty()) {
@@ -63,7 +63,7 @@ public class TrieLogCommand implements Command {
                     return;
                 }
             } else {
-                Hash blockHash = parseHash(blockIdentifier);
+                Hash blockHash = InputParser.parseHash(blockIdentifier, "block hash");
                 trieLog = dbReader.readTrieLog(blockHash);
 
                 if (trieLog.isEmpty()) {
@@ -87,92 +87,6 @@ public class TrieLogCommand implements Command {
             System.err.println("Error: " + e.getMessage());
         } catch (Exception e) {
             System.err.println("Error querying trie log: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Check if the input string is a block number (numeric) rather than a hash.
-     */
-    private boolean isBlockNumber(String input) {
-        // If it starts with 0x, it's a hash
-        if (input.startsWith("0x") || input.startsWith("0X")) {
-            return false;
-        }
-        // Otherwise, check if it's numeric
-        try {
-            Long.parseLong(input);
-            return true;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
-
-    /**
-     * Parse and validate block number.
-     */
-    private long parseBlockNumber(String blockNumberStr) {
-        try {
-            long blockNumber = Long.parseLong(blockNumberStr);
-            if (blockNumber < 0) {
-                throw new IllegalArgumentException(
-                    "Block number cannot be negative: " + blockNumberStr
-                );
-            }
-            return blockNumber;
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                "Invalid block number format. Expected: numeric value. Got: " + blockNumberStr
-            );
-        }
-    }
-
-    /**
-     * Parse and validate 32-byte block hash.
-     */
-    private Hash parseHash(String hashStr) {
-        if (!hashStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid block hash format. Expected: 0x-prefixed hex (64 chars). Got: " + hashStr
-            );
-        }
-
-        if (hashStr.length() != 66) {
-            throw new IllegalArgumentException(
-                "Invalid block hash length. Expected: 66 chars (0x + 64 hex). Got: " + hashStr.length()
-            );
-        }
-
-        try {
-            return Hash.fromHexString(hashStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid block hash format: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Parse and validate Ethereum address.
-     */
-    private Address parseAddress(String addressStr) {
-        if (!addressStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid address format. Expected: 0x-prefixed hex (40 chars). Got: " + addressStr
-            );
-        }
-
-        if (addressStr.length() != 42) {
-            throw new IllegalArgumentException(
-                "Invalid address length. Expected: 42 chars (0x + 40 hex). Got: " + addressStr.length()
-            );
-        }
-
-        try {
-            return Address.fromHexString(addressStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid address format: " + e.getMessage()
-            );
         }
     }
 

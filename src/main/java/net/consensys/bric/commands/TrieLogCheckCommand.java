@@ -51,10 +51,10 @@ public class TrieLogCheckCommand implements Command {
                     System.err.println("Usage: " + getUsage());
                     return;
                 }
-                startBlock = parseBlockNumber(parts[0]);
-                endBlock = parseBlockNumber(parts[1]);
+                startBlock = InputParser.parseBlockNumber(parts[0]);
+                endBlock = InputParser.parseBlockNumber(parts[1]);
             } else {
-                startBlock = parseBlockNumber(rangeStr);
+                startBlock = InputParser.parseBlockNumber(rangeStr);
                 endBlock = startBlock;
             }
 
@@ -123,25 +123,6 @@ public class TrieLogCheckCommand implements Command {
         } else {
             System.out.println();
             System.out.println("Success: All trielogs are present in the specified range!");
-        }
-    }
-
-    /**
-     * Parse and validate block number.
-     */
-    private long parseBlockNumber(String blockNumberStr) {
-        try {
-            long blockNumber = Long.parseLong(blockNumberStr);
-            if (blockNumber < 0) {
-                throw new IllegalArgumentException(
-                    "Block number cannot be negative: " + blockNumberStr
-                );
-            }
-            return blockNumber;
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                "Invalid block number format. Expected: numeric value. Got: " + blockNumberStr
-            );
         }
     }
 

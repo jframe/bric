@@ -54,7 +54,7 @@ public class TrieLogCompareCommand implements Command {
         }
 
         // Check for --verbose flag
-        verbose = hasFlag(args, "--verbose");
+        verbose = InputParser.hasFlag(args, "--verbose");
 
         String blockArg = args[0];
 
@@ -77,11 +77,11 @@ public class TrieLogCompareCommand implements Command {
             Optional<TrieLogData> trieLogOpt;
             long blockNumber;
 
-            if (isBlockNumber(blockIdentifier)) {
-                blockNumber = parseBlockNumber(blockIdentifier);
+            if (InputParser.isBlockNumber(blockIdentifier)) {
+                blockNumber = InputParser.parseBlockNumber(blockIdentifier);
                 trieLogOpt = dbReader.readTrieLogByNumber(blockNumber);
             } else {
-                Hash blockHash = parseHash(blockIdentifier);
+                Hash blockHash = InputParser.parseHash(blockIdentifier, "block hash");
                 trieLogOpt = dbReader.readTrieLog(blockHash);
 
                 if (trieLogOpt.isEmpty()) {
@@ -122,8 +122,8 @@ public class TrieLogCompareCommand implements Command {
                 return;
             }
 
-            long startBlock = parseBlockNumber(parts[0]);
-            long endBlock = parseBlockNumber(parts[1]);
+            long startBlock = InputParser.parseBlockNumber(parts[0]);
+            long endBlock = InputParser.parseBlockNumber(parts[1]);
 
             if (startBlock > endBlock) {
                 System.err.println("Error: Start block must be <= end block");
@@ -451,77 +451,6 @@ public class TrieLogCompareCommand implements Command {
                 }
             }
         }
-    }
-
-    /**
-     * Check if the input string is a block number (numeric) rather than a hash.
-     */
-    private boolean isBlockNumber(String input) {
-        if (input.startsWith("0x") || input.startsWith("0X")) {
-            return false;
-        }
-        try {
-            Long.parseLong(input);
-            return true;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
-
-    /**
-     * Parse and validate block number.
-     */
-    private long parseBlockNumber(String blockNumberStr) {
-        try {
-            long blockNumber = Long.parseLong(blockNumberStr);
-            if (blockNumber < 0) {
-                throw new IllegalArgumentException(
-                    "Block number cannot be negative: " + blockNumberStr
-                );
-            }
-            return blockNumber;
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                "Invalid block number format. Expected: numeric value. Got: " + blockNumberStr
-            );
-        }
-    }
-
-    /**
-     * Parse and validate 32-byte block hash.
-     */
-    private Hash parseHash(String hashStr) {
-        if (!hashStr.startsWith("0x")) {
-            throw new IllegalArgumentException(
-                "Invalid block hash format. Expected: 0x-prefixed hex (64 chars). Got: " + hashStr
-            );
-        }
-
-        if (hashStr.length() != 66) {
-            throw new IllegalArgumentException(
-                "Invalid block hash length. Expected: 66 chars (0x + 64 hex). Got: " + hashStr.length()
-            );
-        }
-
-        try {
-            return Hash.fromHexString(hashStr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                "Invalid block hash format: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Check if a flag is present in the arguments.
-     */
-    private boolean hasFlag(String[] args, String flag) {
-        for (String arg : args) {
-            if (flag.equals(arg)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     @Override
