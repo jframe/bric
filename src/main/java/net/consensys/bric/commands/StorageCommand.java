@@ -42,19 +42,65 @@ public class StorageCommand implements Command {
         String secondArg = args[1];
 
         // Check if this is a raw hash query
-        boolean isRawQuery = args.length >= 3 && args[2].equals("--raw");
+        boolean isRawQuery = hasFlag(args, "--raw");
+
+        // Parse optional --block parameter
+        Optional<Long> blockNumber = Optional.empty();
+        Optional<Hash> blockHash = Optional.empty();
+        for (int i = 0; i < args.length; i++) {
+            if ("--block".equals(args[i]) && i + 1 < args.length) {
+                String blockValue = args[i + 1];
+                if (blockValue.startsWith("0x") && blockValue.length() == 66) {
+                    blockHash = Optional.of(parseBlockHash(blockValue));
+                } else {
+                    try {
+                        blockNumber = Optional.of(Long.parseLong(blockValue));
+                    } catch (NumberFormatException e) {
+                        System.err.println("Error: Invalid block number format: " + blockValue);
+                        return;
+                    }
+                }
+                break;
+            }
+        }
+
+        // Validate block parameter only works with Bonsai Archive
+        if ((blockNumber.isPresent() || blockHash.isPresent()) &&
+            dbManager.getFormat() != BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE) {
+            System.err.println("Error: Block parameter only supported for Bonsai Archive databases");
+            System.err.println("Current database format: " + dbManager.getFormat());
+            return;
+        }
 
         try {
+            // If block hash specified, convert to block number first
+            if (blockHash.isPresent()) {
+                Optional<Long> resolvedBlockNumber = dbReader.getBlockNumberFromHash(blockHash.get());
+                if (resolvedBlockNumber.isEmpty()) {
+                    System.err.println("Error: Block not found for hash: " + blockHash.get().toHexString());
+                    return;
+                }
+                blockNumber = resolvedBlockNumber;
+            }
+
             Optional<StorageData> storageData;
 
             if (isRawQuery) {
                 Hash accountHash = parseHash(firstArg, "account hash");
                 Hash slotHash = parseHash(secondArg, "slot hash");
-                storageData = dbReader.readStorageByHash(accountHash, slotHash);
+                if (blockNumber.isPresent()) {
+                    storageData = dbReader.readStorageByHashAtBlock(accountHash, slotHash, blockNumber.get());
+                } else {
+                    storageData = dbReader.readStorageByHash(accountHash, slotHash);
+                }
             } else {
                 Address address = parseAddress(firstArg);
                 UInt256 slot = parseSlot(secondArg);
-                storageData = dbReader.readStorage(address, slot);
+                if (blockNumber.isPresent()) {
+                    storageData = dbReader.readStorageAtBlock(address, slot, blockNumber.get());
+                } else {
+                    storageData = dbReader.readStorage(address, slot);
+                }
             }
 
             if (storageData.isEmpty()) {
@@ -151,6 +197,25 @@ public class StorageCommand implements Command {
         }
     }
 
+    /**
+     * Parse and validate block hash.
+     */
+    private Hash parseBlockHash(String hashStr) {
+        return parseHash(hashStr, "block hash");
+    }
+
+    /**
+     * Check if a flag is present anywhere in the args array.
+     */
+    private boolean hasFlag(String[] args, String flag) {
+        for (String arg : args) {
+            if (flag.equals(arg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public String getHelp() {
         return "Query storage slot value by contract address and slot";
@@ -158,10 +223,12 @@ public class StorageCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "storage <address> <slot> [--raw]\n" +
+        return "storage <address> <slot> [--block <number|hash>] [--raw]\n" +
                "                               Examples:\n" +
                "                                 storage 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb 0\n" +
                "                                 storage 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb 0x1234\n" +
-               "                                 storage 0x1234...abcd 0x5678...ef01 --raw";
+               "                                 storage 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb 0 --block 12345\n" +
+               "                                 storage 0x1234...abcd 0x5678...ef01 --raw\n" +
+               "                               Note: --block parameter only works with Bonsai Archive databases";
     }
 }

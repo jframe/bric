@@ -22,6 +22,9 @@ public class StorageFormatter {
             sb.append("  Address:      ").append(storage.address.toHexString()).append("\n");
         }
         sb.append("  Account Hash: ").append(storage.accountHash.toHexString()).append("\n");
+        if (storage.blockNumber != null) {
+            sb.append("  Block Number: ").append(String.format("%,d", storage.blockNumber)).append("\n");
+        }
 
         if (storage.slot != null) {
             sb.append("  Slot:         ").append(formatSlot(storage.slot)).append("\n");
