@@ -166,6 +166,11 @@ public class StorageCommand implements Command {
                         "Slot number cannot be negative: " + slotStr
                     );
                 }
+                if (value.bitLength() > 256) {
+                    throw new IllegalArgumentException(
+                        "Slot number exceeds 256 bits: " + slotStr
+                    );
+                }
                 return UInt256.valueOf(value);
             }
         } catch (NumberFormatException e) {
