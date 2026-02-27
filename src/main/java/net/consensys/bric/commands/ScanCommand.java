@@ -120,7 +120,7 @@ public class ScanCommand implements Command {
             String keyHex = Bytes.wrap(key).toHexString();
 
             System.out.printf("[%d] Key (%d bytes): %s%n",
-                finalOffset + displayed[0], key.length, truncateHex(keyHex, 80));
+                (long) finalOffset + displayed[0], key.length, truncateHex(keyHex, 80));
             System.out.printf("    Value (%d bytes): %s%n",
                 value.length, truncateHex(Bytes.wrap(value).toHexString(), 80));
         });
