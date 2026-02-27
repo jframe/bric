@@ -31,7 +31,7 @@ public class CodeCommand implements Command {
     @Override
     public void execute(String[] args) {
         if (!dbManager.isOpen()) {
-            System.err.println("Error: No database is open. Use 'db-open <path>' first.");
+            System.err.println("Error: No database is open. Use 'db open <path>' first.");
             return;
         }
 

@@ -43,7 +43,7 @@ public class BesuDatabaseManager {
     public synchronized void openDatabase(String path) throws Exception {
         if (isOpen) {
             throw new IllegalStateException(
-                "Database is already open at: " + currentPath + ". Close it first with db-close.");
+                "Database is already open at: " + currentPath + ". Close it first with 'db close'.");
         }
 
         Path dbPath = Paths.get(path);
