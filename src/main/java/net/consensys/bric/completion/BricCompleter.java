@@ -1,6 +1,7 @@
 package net.consensys.bric.completion;
 
 import net.consensys.bric.BricCommandProcessor;
+import net.consensys.bric.db.KeyValueSegmentIdentifier;
 import org.jline.reader.Candidate;
 import org.jline.reader.Completer;
 import org.jline.reader.LineReader;
@@ -10,6 +11,8 @@ import org.jline.reader.impl.completer.FileNameCompleter;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Custom completer for Bric REPL commands.
@@ -23,6 +26,10 @@ public class BricCompleter implements Completer {
     private static final Set<String> DEBUG_SUBCOMMANDS = Set.of("account", "storage");
     private static final Set<String> EXIT_COMMANDS = Set.of("exit", "quit");
 
+    private static final Set<String> SEGMENT_NAMES = Stream.of(KeyValueSegmentIdentifier.values())
+        .map(KeyValueSegmentIdentifier::getName)
+        .collect(Collectors.toUnmodifiableSet());
+
     /** Flags available per command. */
     private static final Map<String, Set<String>> COMMAND_FLAGS = Map.of(
         "account", Set.of("--block"),
@@ -30,7 +37,8 @@ public class BricCompleter implements Completer {
         "code", Set.of("--save", "--hash"),
         "trielog", Set.of("--address"),
         "trielog-compare", Set.of("--verbose"),
-        "debug", Set.of("--block")
+        "debug", Set.of("--block"),
+        "scan", Set.of("--limit", "--offset")
     );
 
     /** Flags that take a file path as their next argument. */
@@ -72,6 +80,17 @@ public class BricCompleter implements Completer {
             }
             // Flags for debug subcommands
             completeFlags(words, wordIndex, command, reader, line, candidates);
+            return;
+        }
+
+        // Handle "scan" segment name completion
+        if ("scan".equals(command) && wordIndex == 1) {
+            String prefix = words.length > 1 ? words[1].toUpperCase() : "";
+            for (String segName : SEGMENT_NAMES) {
+                if (segName.startsWith(prefix)) {
+                    candidates.add(new Candidate(segName));
+                }
+            }
             return;
         }
 
