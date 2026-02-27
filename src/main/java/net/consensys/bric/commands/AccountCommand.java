@@ -107,6 +107,10 @@ public class AccountCommand implements Command {
                 System.out.println("Account not found: " + addressOrHash + blockInfo);
                 System.out.println("Note: Account may not exist or database may not be fully synced.");
                 System.out.println("Queried by " + identifier + ": " + addressOrHash);
+                if (isHashQuery) {
+                    System.out.println("Hint: If you have the address, query by address instead.");
+                    System.out.println("      Bric will compute the Keccak256 hash automatically.");
+                }
                 return;
             }
 
