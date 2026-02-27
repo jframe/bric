@@ -112,7 +112,10 @@ public class BricCommandProcessor {
     }
 
     public void processCommand(String commandLine) {
-        String[] parts = commandLine.split("\\s+");
+        String[] parts = tokenize(commandLine);
+        if (parts.length == 0) {
+            return;
+        }
         String commandName = parts[0].toLowerCase();
         String[] args = Arrays.copyOfRange(parts, 1, parts.length);
 
@@ -134,6 +137,43 @@ public class BricCommandProcessor {
             System.out.println("Unknown command: " + commandName);
             System.out.println("Type 'help' for available commands");
         }
+    }
+
+    /**
+     * Tokenize a command line, respecting single and double quotes.
+     * Quoted strings preserve spaces within them. Quotes are stripped from tokens.
+     */
+    static String[] tokenize(String input) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char quote = 0;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (quote != 0) {
+                if (c == quote) {
+                    quote = 0;
+                } else {
+                    current.append(c);
+                }
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (Character.isWhitespace(c)) {
+                if (current.length() > 0) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(c);
+            }
+        }
+
+        if (current.length() > 0) {
+            tokens.add(current.toString());
+        }
+
+        return tokens.toArray(new String[0]);
     }
 
     private void printHelp() {

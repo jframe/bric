@@ -59,4 +59,40 @@ class BricCommandProcessorTest {
         assertThat(output).contains("Unknown command: invalidcommand");
         assertThat(output).contains("Type 'help' for available commands");
     }
+
+    @Test
+    void testTokenizeSimple() {
+        assertThat(BricCommandProcessor.tokenize("db open /path/to/db"))
+                .containsExactly("db", "open", "/path/to/db");
+    }
+
+    @Test
+    void testTokenizeDoubleQuotedPath() {
+        assertThat(BricCommandProcessor.tokenize("db open \"/path/with spaces/db\""))
+                .containsExactly("db", "open", "/path/with spaces/db");
+    }
+
+    @Test
+    void testTokenizeSingleQuotedPath() {
+        assertThat(BricCommandProcessor.tokenize("db open '/path/with spaces/db'"))
+                .containsExactly("db", "open", "/path/with spaces/db");
+    }
+
+    @Test
+    void testTokenizeExtraWhitespace() {
+        assertThat(BricCommandProcessor.tokenize("  db   open   /path/to/db  "))
+                .containsExactly("db", "open", "/path/to/db");
+    }
+
+    @Test
+    void testTokenizeEmptyInput() {
+        assertThat(BricCommandProcessor.tokenize("")).isEmpty();
+        assertThat(BricCommandProcessor.tokenize("   ")).isEmpty();
+    }
+
+    @Test
+    void testTokenizeQuotedSaveFlag() {
+        assertThat(BricCommandProcessor.tokenize("code 0xabc --save \"/my files/out.hex\""))
+                .containsExactly("code", "0xabc", "--save", "/my files/out.hex");
+    }
 }
