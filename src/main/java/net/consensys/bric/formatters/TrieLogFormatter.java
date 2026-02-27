@@ -203,7 +203,11 @@ public class TrieLogFormatter {
             StorageSlotKey slotKey = entry.getKey();
             PathBasedValue<UInt256> change = entry.getValue();
 
-            sb.append("    Slot: ").append(slotKey.getSlotHash().toHexString()).append("\n");
+            sb.append("    Slot Hash: ").append(slotKey.getSlotHash().toHexString());
+            slotKey.getSlotKey().ifPresent(key ->
+                sb.append("  (slot ").append(key.toBigInteger()).append(")")
+            );
+            sb.append("\n");
 
             Optional<UInt256> prior = Optional.ofNullable(change.getPrior())
                 .filter(v -> !v.isZero());
