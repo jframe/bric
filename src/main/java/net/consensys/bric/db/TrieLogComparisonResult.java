@@ -18,14 +18,17 @@ public class TrieLogComparisonResult {
     public int totalAccountComparisons;
     public int accountMatches;
     public int accountMismatches;
+    public int accountDeletions;
 
     public int totalStorageComparisons;
     public int storageMatches;
     public int storageMismatches;
+    public int storageDeletions;
 
     public int totalCodeComparisons;
     public int codeMatches;
     public int codeMismatches;
+    public int codeDeletions;
 
     // Detailed mismatches
     public List<AccountMismatch> accountMismatchList = new ArrayList<>();

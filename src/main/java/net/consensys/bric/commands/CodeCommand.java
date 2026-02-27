@@ -43,18 +43,20 @@ public class CodeCommand implements Command {
 
         String addressOrHash = args[0];
 
-        // Check for --save flag
+        // Parse flags position-independently
         String saveFilePath = null;
-        if (args.length >= 3 && args[1].equals("--save")) {
-            saveFilePath = args[2];
+        boolean isHashQuery = false;
+        for (int i = 1; i < args.length; i++) {
+            if ("--save".equals(args[i]) && i + 1 < args.length) {
+                saveFilePath = args[i + 1];
+                i++; // skip the path argument
+            } else if ("--hash".equals(args[i])) {
+                isHashQuery = true;
+            }
         }
 
-        // Check for --hash flag (query by code hash directly)
-        boolean isHashQuery = false;
-        if (args.length >= 2 && args[1].equals("--hash")) {
-            isHashQuery = true;
-        } else if (addressOrHash.startsWith("0x") && addressOrHash.length() == 66) {
-            // Auto-detect hash format
+        // Auto-detect hash format if --hash not explicitly given
+        if (!isHashQuery && addressOrHash.startsWith("0x") && addressOrHash.length() == 66) {
             isHashQuery = true;
         }
 

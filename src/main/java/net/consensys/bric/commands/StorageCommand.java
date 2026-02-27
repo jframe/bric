@@ -8,6 +8,7 @@ import net.consensys.bric.formatters.StorageFormatter;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 
+import java.math.BigInteger;
 import java.util.Optional;
 
 /**
@@ -158,13 +159,21 @@ public class StorageCommand implements Command {
                 // Hex format
                 return UInt256.fromHexString(slotStr);
             } else {
-                // Decimal format
-                return UInt256.valueOf(Long.parseLong(slotStr));
+                // Decimal format - use BigInteger to support full 256-bit range
+                BigInteger value = new BigInteger(slotStr);
+                if (value.signum() < 0) {
+                    throw new IllegalArgumentException(
+                        "Slot number cannot be negative: " + slotStr
+                    );
+                }
+                return UInt256.valueOf(value);
             }
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                 "Invalid slot format. Expected: decimal number or 0x-prefixed hex. Got: " + slotStr
             );
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalArgumentException(
                 "Invalid slot value: " + e.getMessage()

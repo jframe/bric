@@ -37,22 +37,41 @@ public class TrieLogCompareFormatter {
         int totalMismatches = result.accountMismatches +
                              result.storageMismatches +
                              result.codeMismatches;
+        int totalDeletions = result.accountDeletions +
+                            result.storageDeletions +
+                            result.codeDeletions;
 
         sb.append("Total Checks:    ").append(totalChecks).append("\n");
         sb.append("Matches:         ").append(totalMatches).append("\n");
-        sb.append("Mismatches:      ").append(totalMismatches).append("\n\n");
+        sb.append("Mismatches:      ").append(totalMismatches).append("\n");
+        if (totalDeletions > 0) {
+            sb.append("Deletions:       ").append(totalDeletions).append("\n");
+        }
+        sb.append("\n");
 
         sb.append("Account Checks:  ").append(result.totalAccountComparisons)
           .append(" (").append(result.accountMatches).append(" matches, ")
-          .append(result.accountMismatches).append(" mismatches)\n");
+          .append(result.accountMismatches).append(" mismatches");
+        if (result.accountDeletions > 0) {
+            sb.append(", ").append(result.accountDeletions).append(" deletions");
+        }
+        sb.append(")\n");
 
         sb.append("Storage Checks:  ").append(result.totalStorageComparisons)
           .append(" (").append(result.storageMatches).append(" matches, ")
-          .append(result.storageMismatches).append(" mismatches)\n");
+          .append(result.storageMismatches).append(" mismatches");
+        if (result.storageDeletions > 0) {
+            sb.append(", ").append(result.storageDeletions).append(" deletions");
+        }
+        sb.append(")\n");
 
         sb.append("Code Checks:     ").append(result.totalCodeComparisons)
           .append(" (").append(result.codeMatches).append(" matches, ")
-          .append(result.codeMismatches).append(" mismatches)\n\n");
+          .append(result.codeMismatches).append(" mismatches");
+        if (result.codeDeletions > 0) {
+            sb.append(", ").append(result.codeDeletions).append(" deletions");
+        }
+        sb.append(")\n\n");
 
         // Show mismatches if any
         if (totalMismatches > 0) {

@@ -23,6 +23,11 @@ public class DbOpenCommand implements Command {
 
         String path = args[0];
 
+        // Expand tilde to user home directory
+        if (path.startsWith("~")) {
+            path = System.getProperty("user.home") + path.substring(1);
+        }
+
         try {
             dbManager.openDatabase(path);
             System.out.println("Successfully opened database at: " + path);

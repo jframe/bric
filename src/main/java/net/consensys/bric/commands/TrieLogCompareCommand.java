@@ -203,10 +203,24 @@ public class TrieLogCompareCommand implements Command {
             Address address = entry.getKey();
             AccountValue updated = entry.getValue().getUpdated();
 
-            // Skip deleted accounts (updated == null)
+            // Handle deleted accounts (updated == null)
             if (updated == null) {
                 result.totalAccountComparisons++;
-                result.accountMatches++;
+                result.accountDeletions++;
+
+                // Verify archive confirms deletion
+                Optional<AccountData> archiveData =
+                    dbReader.readAccountAtBlock(address, blockNumber);
+                if (archiveData.isPresent() && archiveData.get().nonce != 0) {
+                    TrieLogComparisonResult.AccountMismatch mismatch = new TrieLogComparisonResult.AccountMismatch();
+                    mismatch.address = address;
+                    mismatch.field = "account";
+                    mismatch.expectedValue = "DELETED";
+                    mismatch.actualValue = "EXISTS (nonce=" + archiveData.get().nonce + ")";
+                    mismatch.archiveBlockNumber = archiveData.get().blockNumber;
+                    result.accountMismatchList.add(mismatch);
+                    result.accountMismatches++;
+                }
                 continue;
             }
 
@@ -311,9 +325,23 @@ public class TrieLogCompareCommand implements Command {
 
                 result.totalStorageComparisons++;
 
-                // Skip if updated is null (deleted)
+                // Handle deleted storage (updated == null)
                 if (updatedValue == null) {
-                    result.storageMatches++;
+                    result.storageDeletions++;
+
+                    // Verify archive confirms deletion
+                    Optional<StorageData> archiveStorage =
+                        dbReader.readStorageByHashAtBlock(address.addressHash(), slotHash, blockNumber);
+                    if (archiveStorage.isPresent() && !archiveStorage.get().value.isZero()) {
+                        TrieLogComparisonResult.StorageMismatch mismatch = new TrieLogComparisonResult.StorageMismatch();
+                        mismatch.address = address;
+                        mismatch.slotHash = slotHash;
+                        mismatch.expectedValue = UInt256.ZERO;
+                        mismatch.actualValue = archiveStorage.get().value;
+                        mismatch.archiveBlockNumber = archiveStorage.get().blockNumber;
+                        result.storageMismatchList.add(mismatch);
+                        result.storageMismatches++;
+                    }
                     continue;
                 }
 
@@ -379,7 +407,7 @@ public class TrieLogCompareCommand implements Command {
 
             if (updatedCode == null) {
                 // Code deleted/cleared
-                result.codeMatches++;
+                result.codeDeletions++;
                 continue;
             }
 

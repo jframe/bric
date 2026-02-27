@@ -46,6 +46,10 @@ public class BricApplication implements Callable<Integer> {
 
         // Auto-open database if path provided
         if (databasePath != null && !databasePath.trim().isEmpty()) {
+            // Expand tilde to user home directory
+            if (databasePath.startsWith("~")) {
+                databasePath = System.getProperty("user.home") + databasePath.substring(1);
+            }
             try {
                 processor.getDbManager().openDatabase(databasePath);
                 System.out.println("Successfully opened database at: " + databasePath);
