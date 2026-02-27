@@ -39,23 +39,24 @@ public class TrieLogCheckCommand implements Command {
         }
 
         try {
-            // Parse range format: "start..end"
+            // Parse block number or range format: "block" or "start..end"
             String rangeStr = args[0];
-            if (!rangeStr.contains("..")) {
-                System.err.println("Error: Invalid range format. Expected: start..end");
-                System.err.println("Usage: " + getUsage());
-                return;
-            }
+            long startBlock;
+            long endBlock;
 
-            String[] parts = rangeStr.split("\\.\\.");
-            if (parts.length != 2) {
-                System.err.println("Error: Invalid range format. Expected: start..end");
-                System.err.println("Usage: " + getUsage());
-                return;
+            if (rangeStr.contains("..")) {
+                String[] parts = rangeStr.split("\\.\\.");
+                if (parts.length != 2) {
+                    System.err.println("Error: Invalid range format. Expected: start..end");
+                    System.err.println("Usage: " + getUsage());
+                    return;
+                }
+                startBlock = parseBlockNumber(parts[0]);
+                endBlock = parseBlockNumber(parts[1]);
+            } else {
+                startBlock = parseBlockNumber(rangeStr);
+                endBlock = startBlock;
             }
-
-            long startBlock = parseBlockNumber(parts[0]);
-            long endBlock = parseBlockNumber(parts[1]);
 
             if (startBlock > endBlock) {
                 System.err.println("Error: Start block must be <= end block");
@@ -151,9 +152,10 @@ public class TrieLogCheckCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "trielog-check <start..end>\n" +
-               "                               Check trielog presence for blocks in range.\n" +
+        return "trielog-check <block|start..end>\n" +
+               "                               Check trielog presence for a block or range.\n" +
                "                               Examples:\n" +
+               "                                 trielog-check 12345        (check single block)\n" +
                "                                 trielog-check 0..1000      (check blocks 0-1000)\n" +
                "                                 trielog-check 12345..12350 (check blocks 12345-12350)";
     }

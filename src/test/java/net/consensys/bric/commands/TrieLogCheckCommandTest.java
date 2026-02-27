@@ -116,7 +116,8 @@ class TrieLogCheckCommandTest {
         command.execute(new String[]{"invalid"});
 
         String error = errorStream.toString();
-        assertThat(error).contains("Error: Invalid range format");
+        assertThat(error).contains("Error:");
+        assertThat(error).contains("Invalid block number format");
     }
 
     @Test
@@ -126,7 +127,8 @@ class TrieLogCheckCommandTest {
         command.execute(new String[]{"0-5"});
 
         String error = errorStream.toString();
-        assertThat(error).contains("Error: Invalid range format");
+        assertThat(error).contains("Error:");
+        assertThat(error).contains("Invalid block number format");
     }
 
     @Test

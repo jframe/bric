@@ -194,6 +194,12 @@ public class BricCommandProcessor {
     private void printStatus() {
         System.out.println("Status:");
         System.out.println("  Verbose mode: " + (verbose ? "enabled" : "disabled"));
+        if (dbManager.isOpen()) {
+            System.out.println("  Database: " + dbManager.getCurrentPath());
+            System.out.println("  Format: " + dbManager.getFormat());
+        } else {
+            System.out.println("  Database: (none)");
+        }
         System.out.println("  Java version: " + System.getProperty("java.version"));
         System.out.println("  Working directory: " + System.getProperty("user.dir"));
     }
