@@ -131,6 +131,119 @@ class TrieLogFormatterTest {
     }
 
     @Test
+    void testFormatWithAccountCreated() {
+        TrieLogData trieLog = new TrieLogData();
+        trieLog.blockHash = Hash.fromHexString(
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        trieLog.blockNumber = 200L;
+
+        TrieLogLayer layer = new TrieLogLayer();
+        Address address = Address.fromHexString("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0");
+
+        PmtStateTrieAccountValue newAccount = new PmtStateTrieAccountValue(
+            0L, Wei.ZERO, Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+
+        layer.addAccountChange(address, null, newAccount);
+        trieLog.trieLogLayer = layer;
+
+        String formatted = formatter.format(trieLog);
+
+        assertThat(formatted).contains("═══ Account Changes ═══");
+        assertThat(formatted).contains("CREATED");
+        assertThat(formatted).doesNotContain("═══ Storage Changes ═══");
+        assertThat(formatted).doesNotContain("═══ Code Changes ═══");
+    }
+
+    @Test
+    void testFormatWithAccountDeleted() {
+        TrieLogData trieLog = new TrieLogData();
+        trieLog.blockHash = Hash.fromHexString(
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        trieLog.blockNumber = 300L;
+
+        TrieLogLayer layer = new TrieLogLayer();
+        Address address = Address.fromHexString("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0");
+
+        PmtStateTrieAccountValue oldAccount = new PmtStateTrieAccountValue(
+            5L, Wei.of(1000), Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+
+        layer.addAccountChange(address, oldAccount, null);
+        trieLog.trieLogLayer = layer;
+
+        String formatted = formatter.format(trieLog);
+
+        assertThat(formatted).contains("Account Changes");
+        assertThat(formatted).contains("DELETED");
+    }
+
+    @Test
+    void testFormatWithAddressFilter_MatchesAddress() {
+        TrieLogData trieLog = new TrieLogData();
+        trieLog.blockHash = Hash.fromHexString(
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        trieLog.blockNumber = 100L;
+
+        TrieLogLayer layer = new TrieLogLayer();
+        Address addr1 = Address.fromHexString("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0");
+        Address addr2 = Address.fromHexString("0x1111111111111111111111111111111111111111");
+
+        PmtStateTrieAccountValue oldAccount = new PmtStateTrieAccountValue(
+            1L, Wei.of(100), Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+        PmtStateTrieAccountValue newAccount = new PmtStateTrieAccountValue(
+            2L, Wei.of(200), Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+
+        layer.addAccountChange(addr1, oldAccount, newAccount);
+        layer.addAccountChange(addr2, oldAccount, newAccount);
+        trieLog.trieLogLayer = layer;
+
+        // Filter to addr1 only
+        String formatted = formatter.format(trieLog, addr1);
+
+        assertThat(formatted).contains(addr1.toHexString());
+        assertThat(formatted).doesNotContain(addr2.toHexString());
+        assertThat(formatted).contains("Filter:");
+    }
+
+    @Test
+    void testFormatWithAddressFilter_NoMatch() {
+        TrieLogData trieLog = new TrieLogData();
+        trieLog.blockHash = Hash.fromHexString(
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        trieLog.blockNumber = 100L;
+
+        TrieLogLayer layer = new TrieLogLayer();
+        Address addr1 = Address.fromHexString("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0");
+
+        PmtStateTrieAccountValue oldAccount = new PmtStateTrieAccountValue(
+            1L, Wei.of(100), Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+        PmtStateTrieAccountValue newAccount = new PmtStateTrieAccountValue(
+            2L, Wei.of(200), Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+
+        layer.addAccountChange(addr1, oldAccount, newAccount);
+        trieLog.trieLogLayer = layer;
+
+        // Filter by an address not in the trie log
+        Address filterAddr = Address.fromHexString("0x9999999999999999999999999999999999999999");
+        String formatted = formatter.format(trieLog, filterAddr);
+
+        assertThat(formatted).contains("No changes found for address");
+        assertThat(formatted).contains(filterAddr.toHexString());
+        assertThat(formatted).doesNotContain("═══ Account Changes ═══");
+    }
+
+    @Test
+    void testFormatNullTrieLogLayer() {
+        TrieLogData trieLog = new TrieLogData();
+        trieLog.blockHash = Hash.fromHexString(
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        trieLog.trieLogLayer = null;
+
+        String formatted = formatter.format(trieLog);
+
+        assertThat(formatted).contains("No trie log data available");
+    }
+
+    @Test
     void testFormatWithStorageChange() {
         TrieLogData trieLog = new TrieLogData();
         trieLog.blockHash = Hash.fromHexString(
