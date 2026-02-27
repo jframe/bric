@@ -55,7 +55,15 @@ public class BesuDatabaseManager {
         }
 
         LOG.info("Loading RocksDB library...");
-        RocksDB.loadLibrary();
+        try {
+            RocksDB.loadLibrary();
+        } catch (UnsatisfiedLinkError e) {
+            throw new Exception(
+                "Failed to load RocksDB native library. " +
+                "This may be a platform compatibility issue. " +
+                "OS: " + System.getProperty("os.name") + " " + System.getProperty("os.arch") +
+                ", Java: " + System.getProperty("java.version"), e);
+        }
 
         LOG.info("Opening database at: {}", path);
 
