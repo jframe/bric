@@ -31,7 +31,8 @@ class BricCompleterTest {
 
         // Setup mock processor with default commands
         when(mockProcessor.getCommandNames())
-            .thenReturn(Set.of("help", "version", "status", "db", "account", "storage", "code", "trielog"));
+            .thenReturn(Set.of("help", "version", "status", "db", "account", "storage", "code", "trielog",
+                               "trielog-compare", "trielog-check", "debug"));
 
         completer = new BricCompleter(mockProcessor);
     }
@@ -138,19 +139,6 @@ class BricCompleterTest {
     }
 
     @Test
-    void testNoCompletionForNonDbCommandSecondArgument() {
-        when(mockParsedLine.words()).thenReturn(Arrays.asList("account", "0x123"));
-        when(mockParsedLine.wordIndex()).thenReturn(1);
-
-        List<Candidate> candidates = new ArrayList<>();
-        completer.complete(mockReader, mockParsedLine, candidates);
-
-        // Should not add any command completions for second argument of non-db commands
-        // (file completions might be added by FileNameCompleter for certain cases, but we don't test that here)
-        assertThat(candidates).isEmpty();
-    }
-
-    @Test
     void testCompleteMultipleMatchingCommands() {
         when(mockParsedLine.words()).thenReturn(Arrays.asList("s"));
         when(mockParsedLine.wordIndex()).thenReturn(0);
@@ -162,5 +150,132 @@ class BricCompleterTest {
         assertThat(candidates).hasSizeGreaterThanOrEqualTo(2);
         assertThat(candidates).anyMatch(c -> c.value().equals("status"));
         assertThat(candidates).anyMatch(c -> c.value().equals("storage"));
+    }
+
+    // --- Debug subcommand completion ---
+
+    @Test
+    void testCompleteDebugSubcommands() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("debug", ""));
+        when(mockParsedLine.wordIndex()).thenReturn(1);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(2);
+        assertThat(candidates).anyMatch(c -> c.value().equals("account"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("storage"));
+    }
+
+    @Test
+    void testCompleteDebugSubcommandPartial() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("debug", "ac"));
+        when(mockParsedLine.wordIndex()).thenReturn(1);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(1);
+        assertThat(candidates.get(0).value()).isEqualTo("account");
+    }
+
+    // --- Flag completion ---
+
+    @Test
+    void testCompleteAccountFlags() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("account", "0x123", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(1);
+        assertThat(candidates).anyMatch(c -> c.value().equals("--block"));
+    }
+
+    @Test
+    void testCompleteStorageFlags() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("storage", "0xaddr", "0", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(3);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(2);
+        assertThat(candidates).anyMatch(c -> c.value().equals("--block"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("--raw"));
+    }
+
+    @Test
+    void testCompleteCodeFlags() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("code", "0xaddr", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(2);
+        assertThat(candidates).anyMatch(c -> c.value().equals("--save"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("--hash"));
+    }
+
+    @Test
+    void testCompleteTrielogFlags() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("trielog", "12345", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(1);
+        assertThat(candidates).anyMatch(c -> c.value().equals("--address"));
+    }
+
+    @Test
+    void testCompleteTrielogCompareFlags() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("trielog-compare", "100..200", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(1);
+        assertThat(candidates).anyMatch(c -> c.value().equals("--verbose"));
+    }
+
+    @Test
+    void testFlagNotSuggestedWhenAlreadyUsed() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("storage", "0xaddr", "0", "--raw", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(4);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        // --raw already used, only --block should be offered
+        assertThat(candidates).hasSize(1);
+        assertThat(candidates.get(0).value()).isEqualTo("--block");
+    }
+
+    @Test
+    void testDebugFlagCompletion() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("debug", "account", "0xaddr", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(3);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(1);
+        assertThat(candidates.get(0).value()).isEqualTo("--block");
+    }
+
+    @Test
+    void testNoFlagCompletionForUnknownCommand() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("help", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(1);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).isEmpty();
     }
 }
