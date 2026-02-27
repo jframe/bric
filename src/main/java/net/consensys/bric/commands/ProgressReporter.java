@@ -6,12 +6,17 @@ package net.consensys.bric.commands;
  */
 public class ProgressReporter {
 
+    private static final long INITIAL_DELAY_MILLIS = 3000L;
+
     private final long intervalMillis;
     private long lastReportTime;
     private long startTime;
+    private boolean firstReportDone;
 
     /**
      * Create a progress reporter with the specified interval.
+     * The first progress report fires after 3 seconds for early feedback,
+     * then subsequent reports use the specified interval.
      *
      * @param intervalSeconds Time interval in seconds between progress updates
      */
@@ -19,17 +24,21 @@ public class ProgressReporter {
         this.intervalMillis = intervalSeconds * 1000L;
         this.startTime = System.currentTimeMillis();
         this.lastReportTime = startTime;
+        this.firstReportDone = false;
     }
 
     /**
      * Check if it's time to report progress and update the last report time if so.
+     * Uses a shorter initial delay for early feedback.
      *
      * @return true if progress should be reported, false otherwise
      */
     public boolean shouldReport() {
         long currentTime = System.currentTimeMillis();
-        if (currentTime - lastReportTime >= intervalMillis) {
+        long threshold = firstReportDone ? intervalMillis : Math.min(INITIAL_DELAY_MILLIS, intervalMillis);
+        if (currentTime - lastReportTime >= threshold) {
             lastReportTime = currentTime;
+            firstReportDone = true;
             return true;
         }
         return false;
