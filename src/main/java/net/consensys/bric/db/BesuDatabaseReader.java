@@ -348,6 +348,44 @@ public class BesuDatabaseReader {
     }
 
     /**
+     * Read the chain head hash and block number from the VARIABLES segment.
+     *
+     * @return Optional containing a two-element array [blockNumber, blockHash] if found
+     */
+    public Optional<ChainHeadInfo> readChainHead() {
+        try {
+            byte[] key = "chainHeadHash".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            Optional<byte[]> rawData = segmentReader.get(
+                KeyValueSegmentIdentifier.VARIABLES, key);
+
+            if (rawData.isEmpty()) {
+                return Optional.empty();
+            }
+
+            Hash headHash = Hash.wrap(Bytes32.wrap(rawData.get()));
+            Optional<Long> blockNumber = getBlockNumberFromHash(headHash);
+
+            return Optional.of(new ChainHeadInfo(headHash, blockNumber.orElse(null)));
+        } catch (Exception e) {
+            LOG.error("Error reading chain head: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Container for chain head information.
+     */
+    public static class ChainHeadInfo {
+        public final Hash blockHash;
+        public final Long blockNumber;
+
+        public ChainHeadInfo(Hash blockHash, Long blockNumber) {
+            this.blockHash = blockHash;
+            this.blockNumber = blockNumber;
+        }
+    }
+
+    /**
      * Check if the database is a Bonsai Archive database.
      * Logs a warning if the check fails.
      *

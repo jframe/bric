@@ -2,9 +2,11 @@ package net.consensys.bric.commands;
 
 import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.BesuDatabaseManager.DatabaseStats;
+import net.consensys.bric.db.BesuDatabaseReader;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Command to display database information and statistics.
@@ -12,9 +14,11 @@ import java.util.List;
 public class DbInfoCommand implements Command {
 
     private final BesuDatabaseManager dbManager;
+    private final BesuDatabaseReader dbReader;
 
     public DbInfoCommand(BesuDatabaseManager dbManager) {
         this.dbManager = dbManager;
+        this.dbReader = new BesuDatabaseReader(dbManager);
     }
 
     @Override
@@ -27,6 +31,17 @@ public class DbInfoCommand implements Command {
         System.out.println("\nDatabase Information:");
         System.out.println("  Path: " + dbManager.getCurrentPath());
         System.out.println("  Format: " + dbManager.getFormat());
+
+        Optional<BesuDatabaseReader.ChainHeadInfo> chainHead = dbReader.readChainHead();
+        if (chainHead.isPresent()) {
+            BesuDatabaseReader.ChainHeadInfo head = chainHead.get();
+            if (head.blockNumber != null) {
+                System.out.println("  Chain Head: block " + String.format("%,d", head.blockNumber)
+                    + " (" + head.blockHash.toHexString() + ")");
+            } else {
+                System.out.println("  Chain Head: " + head.blockHash.toHexString());
+            }
+        }
         System.out.println();
 
         System.out.println("Column Family Statistics:");
