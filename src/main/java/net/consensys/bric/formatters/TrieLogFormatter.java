@@ -67,6 +67,7 @@ public class TrieLogFormatter {
         sb.append("\n");
 
         // Display account changes
+        boolean hasFilteredOutput = false;
         if (trieLog.hasAccountChanges()) {
             boolean headerPrinted = false;
             for (Map.Entry<Address, PathBasedValue<AccountValue>> entry :
@@ -77,6 +78,7 @@ public class TrieLogFormatter {
                 if (!headerPrinted) {
                     sb.append("═══ Account Changes ═══\n\n");
                     headerPrinted = true;
+                    hasFilteredOutput = true;
                 }
                 formatAccountChange(sb, entry.getKey(), entry.getValue());
                 sb.append("\n");
@@ -94,6 +96,7 @@ public class TrieLogFormatter {
                 if (!headerPrinted) {
                     sb.append("═══ Code Changes ═══\n\n");
                     headerPrinted = true;
+                    hasFilteredOutput = true;
                 }
                 formatCodeChange(sb, entry.getKey(), entry.getValue());
                 sb.append("\n");
@@ -111,6 +114,7 @@ public class TrieLogFormatter {
                 if (!headerPrinted) {
                     sb.append("═══ Storage Changes ═══\n\n");
                     headerPrinted = true;
+                    hasFilteredOutput = true;
                 }
                 formatStorageChanges(sb, entry.getKey(), entry.getValue());
                 sb.append("\n");
@@ -119,6 +123,8 @@ public class TrieLogFormatter {
 
         if (addressFilter == null && trieLog.isEmpty()) {
             sb.append("(Empty block - no state changes)\n");
+        } else if (addressFilter != null && !hasFilteredOutput) {
+            sb.append("(No changes found for address ").append(addressFilter.toHexString()).append(")\n");
         }
 
         return sb.toString();
