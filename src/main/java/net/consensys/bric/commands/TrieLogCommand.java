@@ -4,6 +4,7 @@ import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.BesuDatabaseReader;
 import net.consensys.bric.db.TrieLogData;
 import net.consensys.bric.formatters.TrieLogFormatter;
+import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 
 import java.util.Optional;
@@ -38,6 +39,15 @@ public class TrieLogCommand implements Command {
 
         String blockIdentifier = args[0];
 
+        // Parse optional --address filter
+        Optional<Address> addressFilter = Optional.empty();
+        for (int i = 1; i < args.length; i++) {
+            if ("--address".equals(args[i]) && i + 1 < args.length) {
+                addressFilter = Optional.of(parseAddress(args[i + 1]));
+                break;
+            }
+        }
+
         try {
             Optional<TrieLogData> trieLog;
 
@@ -64,7 +74,9 @@ public class TrieLogCommand implements Command {
                 }
             }
 
-            String formatted = formatter.format(trieLog.get());
+            String formatted = addressFilter.isPresent()
+                ? formatter.format(trieLog.get(), addressFilter.get())
+                : formatter.format(trieLog.get());
             System.out.println(formatted);
 
             if (formatter.isEmpty(trieLog.get())) {
@@ -139,6 +151,31 @@ public class TrieLogCommand implements Command {
         }
     }
 
+    /**
+     * Parse and validate Ethereum address.
+     */
+    private Address parseAddress(String addressStr) {
+        if (!addressStr.startsWith("0x")) {
+            throw new IllegalArgumentException(
+                "Invalid address format. Expected: 0x-prefixed hex (40 chars). Got: " + addressStr
+            );
+        }
+
+        if (addressStr.length() != 42) {
+            throw new IllegalArgumentException(
+                "Invalid address length. Expected: 42 chars (0x + 40 hex). Got: " + addressStr.length()
+            );
+        }
+
+        try {
+            return Address.fromHexString(addressStr);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                "Invalid address format: " + e.getMessage()
+            );
+        }
+    }
+
     @Override
     public String getHelp() {
         return "Query trie log (state diff) by block hash or block number";
@@ -146,9 +183,10 @@ public class TrieLogCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "trielog <block-hash|block-number>\n" +
+        return "trielog <block-hash|block-number> [--address <address>]\n" +
                "                               Examples:\n" +
                "                                 trielog 12345\n" +
+               "                                 trielog 12345 --address 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb\n" +
                "                                 trielog 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
     }
 }

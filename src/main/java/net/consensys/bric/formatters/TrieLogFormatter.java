@@ -25,6 +25,14 @@ public class TrieLogFormatter {
      * Format trie log as a multi-section diff display.
      */
     public String format(TrieLogData trieLog) {
+        return format(trieLog, null);
+    }
+
+    /**
+     * Format trie log filtered to a specific address.
+     * When addressFilter is non-null, only changes for that address are shown.
+     */
+    public String format(TrieLogData trieLog, Address addressFilter) {
         StringBuilder sb = new StringBuilder();
 
         sb.append("\nTrie Log (State Diff):\n");
@@ -34,6 +42,10 @@ public class TrieLogFormatter {
             sb.append("  Block Number: ").append(String.format("%,d", trieLog.blockNumber)).append("\n");
         }
 
+        if (addressFilter != null) {
+            sb.append("  Filter: ").append(addressFilter.toHexString()).append("\n");
+        }
+
         sb.append("\n");
 
         if (trieLog.trieLogLayer == null) {
@@ -41,14 +53,14 @@ public class TrieLogFormatter {
             return sb.toString();
         }
 
-        // Display summary
+        // Display summary (always shows full block totals)
         int accountChanges = trieLog.trieLogLayer.getAccountChanges().size();
         int codeChanges = trieLog.trieLogLayer.getCodeChanges().size();
         int storageChanges = trieLog.trieLogLayer.getStorageChanges().values().stream()
             .mapToInt(Map::size)
             .sum();
 
-        sb.append("Summary:\n");
+        sb.append("Summary (full block):\n");
         sb.append("  Account Changes: ").append(accountChanges).append("\n");
         sb.append("  Code Changes:    ").append(codeChanges).append("\n");
         sb.append("  Storage Changes: ").append(storageChanges).append("\n");
@@ -56,9 +68,16 @@ public class TrieLogFormatter {
 
         // Display account changes
         if (trieLog.hasAccountChanges()) {
-            sb.append("═══ Account Changes ═══\n\n");
+            boolean headerPrinted = false;
             for (Map.Entry<Address, PathBasedValue<AccountValue>> entry :
                 trieLog.trieLogLayer.getAccountChanges().entrySet()) {
+                if (addressFilter != null && !entry.getKey().equals(addressFilter)) {
+                    continue;
+                }
+                if (!headerPrinted) {
+                    sb.append("═══ Account Changes ═══\n\n");
+                    headerPrinted = true;
+                }
                 formatAccountChange(sb, entry.getKey(), entry.getValue());
                 sb.append("\n");
             }
@@ -66,9 +85,16 @@ public class TrieLogFormatter {
 
         // Display code changes
         if (trieLog.hasCodeChanges()) {
-            sb.append("═══ Code Changes ═══\n\n");
+            boolean headerPrinted = false;
             for (Map.Entry<Address, PathBasedValue<Bytes>> entry :
                 trieLog.trieLogLayer.getCodeChanges().entrySet()) {
+                if (addressFilter != null && !entry.getKey().equals(addressFilter)) {
+                    continue;
+                }
+                if (!headerPrinted) {
+                    sb.append("═══ Code Changes ═══\n\n");
+                    headerPrinted = true;
+                }
                 formatCodeChange(sb, entry.getKey(), entry.getValue());
                 sb.append("\n");
             }
@@ -76,15 +102,22 @@ public class TrieLogFormatter {
 
         // Display storage changes
         if (trieLog.hasStorageChanges()) {
-            sb.append("═══ Storage Changes ═══\n\n");
+            boolean headerPrinted = false;
             for (Map.Entry<Address, Map<StorageSlotKey, PathBasedValue<UInt256>>> entry :
                 trieLog.trieLogLayer.getStorageChanges().entrySet()) {
+                if (addressFilter != null && !entry.getKey().equals(addressFilter)) {
+                    continue;
+                }
+                if (!headerPrinted) {
+                    sb.append("═══ Storage Changes ═══\n\n");
+                    headerPrinted = true;
+                }
                 formatStorageChanges(sb, entry.getKey(), entry.getValue());
                 sb.append("\n");
             }
         }
 
-        if (trieLog.isEmpty()) {
+        if (addressFilter == null && trieLog.isEmpty()) {
             sb.append("(Empty block - no state changes)\n");
         }
 
