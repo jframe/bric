@@ -31,6 +31,8 @@ public class DbInfoCommand implements Command {
         System.out.println("\nDatabase Information:");
         System.out.println("  Path: " + dbManager.getCurrentPath());
         System.out.println("  Format: " + dbManager.getFormat());
+        dbReader.readFlatDbMode().ifPresent(mode ->
+            System.out.println("  Flat DB Mode: " + mode));
 
         Optional<BesuDatabaseReader.ChainHeadInfo> chainHead = dbReader.readChainHead();
         if (chainHead.isPresent()) {

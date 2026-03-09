@@ -348,6 +348,38 @@ public class BesuDatabaseReader {
     }
 
     /**
+     * Read the flat DB mode stored in TRIE_BRANCH_STORAGE under key "flatDbStatus".
+     * Version bytes match Besu's FlatDbMode enum: empty=NO_FLATTENED, 0x00=PARTIAL, 0x01=FULL, 0x02=ARCHIVE.
+     *
+     * @return Optional containing the flat DB mode name if found
+     */
+    public Optional<String> readFlatDbMode() {
+        try {
+            byte[] key = "flatDbStatus".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            Optional<byte[]> rawData = segmentReader.get(
+                KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE, key);
+
+            if (rawData.isEmpty()) {
+                return Optional.empty();
+            }
+
+            byte[] version = rawData.get();
+            if (version.length == 0) {
+                return Optional.of("NO_FLATTENED");
+            }
+            return Optional.of(switch (version[0]) {
+                case 0x00 -> "PARTIAL";
+                case 0x01 -> "FULL";
+                case 0x02 -> "ARCHIVE";
+                default -> "UNKNOWN (0x" + String.format("%02x", version[0]) + ")";
+            });
+        } catch (Exception e) {
+            LOG.error("Error reading flat DB mode: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Read the chain head hash and block number from the VARIABLES segment.
      *
      * @return Optional containing a two-element array [blockNumber, blockHash] if found
