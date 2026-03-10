@@ -97,16 +97,41 @@ public class BesuDatabaseManager {
 
         LOG.info("Found {} column families", cfNames.size());
 
-        // Create column family descriptors
-        List<ColumnFamilyDescriptor> cfDescriptors = new ArrayList<>();
-        for (byte[] cfName : cfNames) {
-            cfDescriptors.add(new ColumnFamilyDescriptor(cfName));
-        }
+        // Build descriptors and open options, loading from OPTIONS file for write mode
+        // to avoid column family option mismatches (Besu uses non-default CF options)
+        List<ColumnFamilyDescriptor> cfDescriptors;
+        DBOptions dbOptions;
 
-        // Open database in read-only or read-write mode
-        DBOptions dbOptions = new DBOptions()
-            .setCreateIfMissing(false)
-            .setCreateMissingColumnFamilies(false);
+        if (writable) {
+            DBOptions loadedOptions = new DBOptions();
+            List<ColumnFamilyDescriptor> loadedDescs = new ArrayList<>();
+            boolean loaded = false;
+            try (ConfigOptions configOptions = new ConfigOptions().setIgnoreUnknownOptions(true)) {
+                OptionsUtil.loadLatestOptions(configOptions, path, loadedOptions, loadedDescs);
+                loaded = true;
+                LOG.debug("Loaded options from OPTIONS file ({} column families)", loadedDescs.size());
+            } catch (RocksDBException e) {
+                loadedOptions.close();
+                LOG.warn("Could not load OPTIONS file, falling back to default options: {}", e.getMessage());
+            }
+
+            if (loaded && !loadedDescs.isEmpty()) {
+                cfDescriptors = loadedDescs;
+                dbOptions = loadedOptions;
+            } else {
+                dbOptions = new DBOptions().setCreateIfMissing(false).setCreateMissingColumnFamilies(false);
+                cfDescriptors = new ArrayList<>();
+                for (byte[] cfName : cfNames) {
+                    cfDescriptors.add(new ColumnFamilyDescriptor(cfName));
+                }
+            }
+        } else {
+            dbOptions = new DBOptions().setCreateIfMissing(false).setCreateMissingColumnFamilies(false);
+            cfDescriptors = new ArrayList<>();
+            for (byte[] cfName : cfNames) {
+                cfDescriptors.add(new ColumnFamilyDescriptor(cfName));
+            }
+        }
 
         try {
             if (writable) {
@@ -116,14 +141,14 @@ public class BesuDatabaseManager {
             }
         } catch (RocksDBException e) {
             dbOptions.close();
-            throw new Exception("Failed to open database", e);
+            throw new Exception("Failed to open database: " + e.getMessage(), e);
         }
 
         dbOptions.close();
 
         // Map column family handles by name
-        for (int i = 0; i < cfNames.size(); i++) {
-            String name = KeyValueSegmentIdentifier.idToString(cfNames.get(i));
+        for (int i = 0; i < cfDescriptors.size(); i++) {
+            String name = KeyValueSegmentIdentifier.idToString(cfDescriptors.get(i).getName());
             handlesByName.put(name, columnFamilyHandles.get(i));
             LOG.debug("Mapped column family: {}", name);
         }
