@@ -15,6 +15,7 @@ public class DbCommand implements Command {
     private final DbCloseCommand closeCommand;
     private final DbInfoCommand infoCommand;
     private final DbGetCommand getCommand;
+    private final DbPutCommand putCommand;
     private final ScanCommand scanCommand;
 
     public DbCommand(BesuDatabaseManager dbManager) {
@@ -23,6 +24,7 @@ public class DbCommand implements Command {
         this.closeCommand = new DbCloseCommand(dbManager);
         this.infoCommand = new DbInfoCommand(dbManager);
         this.getCommand = new DbGetCommand(dbManager);
+        this.putCommand = new DbPutCommand(dbManager);
         this.scanCommand = new ScanCommand(dbManager);
     }
 
@@ -50,6 +52,9 @@ public class DbCommand implements Command {
             case "get":
                 getCommand.execute(subArgs);
                 break;
+            case "put":
+                putCommand.execute(subArgs);
+                break;
             case "scan":
                 scanCommand.execute(subArgs);
                 break;
@@ -62,17 +67,18 @@ public class DbCommand implements Command {
 
     @Override
     public String getHelp() {
-        return "Database operations (open, close, info, get, scan)";
+        return "Database operations (open, close, info, get, put, scan)";
     }
 
     @Override
     public String getUsage() {
         return "db <subcommand> [args]\n" +
                "                               Subcommands:\n" +
-               "                                 db open <path>                          - Open a database in read-only mode\n" +
-               "                                 db close                                - Close the currently open database\n" +
-               "                                 db info                                 - Display database statistics\n" +
-               "                                 db get <segment> <hex-key>              - Retrieve a raw value by key\n" +
+               "                                 db open <path> [--write]                   - Open a database (read-only by default)\n" +
+               "                                 db close                                   - Close the currently open database\n" +
+               "                                 db info                                    - Display database statistics\n" +
+               "                                 db get <segment> <hex-key>                 - Retrieve a raw value by key\n" +
+               "                                 db put <segment> <hex-key> <hex-value>     - Write a raw value by key (requires --write)\n" +
                "                                 db scan <segment> [--limit n] [--offset n] - Scan raw key-value entries";
     }
 }

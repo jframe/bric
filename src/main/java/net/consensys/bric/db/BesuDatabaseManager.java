@@ -23,6 +23,7 @@ public class BesuDatabaseManager {
     private final Map<String, ColumnFamilyHandle> handlesByName = new HashMap<>();
     private DatabaseFormat format;
     private boolean isOpen = false;
+    private boolean writable = false;
 
     public enum DatabaseFormat {
         BONSAI,
@@ -41,6 +42,17 @@ public class BesuDatabaseManager {
      * @throws Exception if database cannot be opened
      */
     public synchronized void openDatabase(String path) throws Exception {
+        openDatabase(path, false);
+    }
+
+    /**
+     * Open a Besu database.
+     *
+     * @param path     Path to the database directory
+     * @param writable Whether to open in read-write mode
+     * @throws Exception if database cannot be opened
+     */
+    public synchronized void openDatabase(String path, boolean writable) throws Exception {
         if (isOpen) {
             throw new IllegalStateException(
                 "Database is already open at: " + currentPath + ". Close it first with 'db close'.");
@@ -91,13 +103,17 @@ public class BesuDatabaseManager {
             cfDescriptors.add(new ColumnFamilyDescriptor(cfName));
         }
 
-        // Open database in read-only mode
+        // Open database in read-only or read-write mode
         DBOptions dbOptions = new DBOptions()
             .setCreateIfMissing(false)
             .setCreateMissingColumnFamilies(false);
 
         try {
-            db = RocksDB.openReadOnly(dbOptions, path, cfDescriptors, columnFamilyHandles);
+            if (writable) {
+                db = RocksDB.open(dbOptions, path, cfDescriptors, columnFamilyHandles);
+            } else {
+                db = RocksDB.openReadOnly(dbOptions, path, cfDescriptors, columnFamilyHandles);
+            }
         } catch (RocksDBException e) {
             dbOptions.close();
             throw new Exception("Failed to open database", e);
@@ -115,6 +131,7 @@ public class BesuDatabaseManager {
         currentPath = path;
         format = detectDatabaseFormat();
         isOpen = true;
+        this.writable = writable;
 
         LOG.info("Database opened successfully. Format: {}", format);
     }
@@ -146,6 +163,7 @@ public class BesuDatabaseManager {
         currentPath = null;
         format = null;
         isOpen = false;
+        writable = false;
 
         LOG.info("Database closed successfully");
     }
@@ -192,6 +210,25 @@ public class BesuDatabaseManager {
 
     public boolean isOpen() {
         return isOpen;
+    }
+
+    public boolean isWritable() {
+        return writable;
+    }
+
+    /**
+     * Write a key-value pair to a column family.
+     *
+     * @throws IllegalStateException if the database is not open or not writable
+     */
+    public void put(ColumnFamilyHandle handle, byte[] key, byte[] value) throws RocksDBException {
+        if (!isOpen) {
+            throw new IllegalStateException("No database is open");
+        }
+        if (!writable) {
+            throw new IllegalStateException("Database is open in read-only mode");
+        }
+        db.put(handle, key, value);
     }
 
     public String getCurrentPath() {

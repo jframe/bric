@@ -47,7 +47,7 @@ class DbOpenCommandTest {
 
         command.execute(new String[]{"/path/to/db"});
 
-        verify(mockDbManager).openDatabase("/path/to/db");
+        verify(mockDbManager).openDatabase("/path/to/db", false);
         String output = outputStream.toString();
         assertThat(output).contains("Successfully opened database");
         assertThat(output).contains("/path/to/db");
@@ -58,7 +58,7 @@ class DbOpenCommandTest {
     @Test
     void testExecuteFailure() throws Exception {
         doThrow(new RuntimeException("Database not found"))
-            .when(mockDbManager).openDatabase(anyString());
+            .when(mockDbManager).openDatabase(anyString(), anyBoolean());
 
         command.execute(new String[]{"/invalid/path"});
 

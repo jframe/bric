@@ -56,7 +56,7 @@ class DbCommandTest {
 
         command.execute(new String[]{"open", "/path/to/db"});
 
-        verify(mockDbManager).openDatabase("/path/to/db");
+        verify(mockDbManager).openDatabase("/path/to/db", false);
         String output = outputStream.toString();
         assertThat(output).contains("Successfully opened database");
     }
@@ -100,7 +100,7 @@ class DbCommandTest {
 
         command.execute(new String[]{"OPEN", "/path/to/db"});
 
-        verify(mockDbManager).openDatabase("/path/to/db");
+        verify(mockDbManager).openDatabase("/path/to/db", false);
     }
 
     @Test

@@ -28,11 +28,21 @@ public class DbOpenCommand implements Command {
             path = System.getProperty("user.home") + path.substring(1);
         }
 
+        boolean writable = false;
+        for (int i = 1; i < args.length; i++) {
+            if ("--write".equals(args[i])) {
+                writable = true;
+            }
+        }
+
         try {
-            dbManager.openDatabase(path);
+            dbManager.openDatabase(path, writable);
             System.out.println("Successfully opened database at: " + path);
             System.out.println("Database format: " + dbManager.getFormat());
             System.out.println("Column families: " + dbManager.getColumnFamilyNames().size());
+            if (writable) {
+                System.out.println("Warning: database opened in write mode");
+            }
         } catch (Exception e) {
             System.err.println("Error opening database: " + e.getMessage());
         }
@@ -40,14 +50,14 @@ public class DbOpenCommand implements Command {
 
     @Override
     public String getHelp() {
-        return "Open a Besu database in read-only mode";
+        return "Open a Besu database (read-only by default, use --write for write access)";
     }
 
     @Override
     public String getUsage() {
-        return "db open <path>\n" +
+        return "db open <path> [--write]\n" +
                "                               Examples:\n" +
                "                                 db open /path/to/besu/database\n" +
-               "                                 db open ~/besu-data/database";
+               "                                 db open ~/besu-data/database --write";
     }
 }
