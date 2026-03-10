@@ -1,6 +1,7 @@
 package net.consensys.bric.completion;
 
 import net.consensys.bric.BricCommandProcessor;
+import net.consensys.bric.db.BesuDatabaseManager;
 import org.jline.reader.Candidate;
 import org.jline.reader.LineReader;
 import org.jline.reader.ParsedLine;
@@ -19,6 +20,7 @@ import static org.mockito.Mockito.*;
 class BricCompleterTest {
 
     private BricCommandProcessor mockProcessor;
+    private BesuDatabaseManager mockDbManager;
     private BricCompleter completer;
     private LineReader mockReader;
     private ParsedLine mockParsedLine;
@@ -26,13 +28,15 @@ class BricCompleterTest {
     @BeforeEach
     void setUp() {
         mockProcessor = Mockito.mock(BricCommandProcessor.class);
+        mockDbManager = Mockito.mock(BesuDatabaseManager.class);
         mockReader = Mockito.mock(LineReader.class);
         mockParsedLine = Mockito.mock(ParsedLine.class);
 
-        // Setup mock processor with default commands
         when(mockProcessor.getCommandNames())
             .thenReturn(Set.of("help", "version", "status", "db", "account", "storage", "code", "trielog",
-                               "trielog-compare", "trielog-check", "debug"));
+                               "trielog-compare", "trielog-check"));
+        when(mockProcessor.getDbManager()).thenReturn(mockDbManager);
+        when(mockDbManager.isOpen()).thenReturn(false);
 
         completer = new BricCompleter(mockProcessor);
     }
@@ -84,10 +88,13 @@ class BricCompleterTest {
         List<Candidate> candidates = new ArrayList<>();
         completer.complete(mockReader, mockParsedLine, candidates);
 
-        assertThat(candidates).hasSize(3);
+        assertThat(candidates).hasSize(6);
         assertThat(candidates).anyMatch(c -> c.value().equals("open"));
         assertThat(candidates).anyMatch(c -> c.value().equals("close"));
         assertThat(candidates).anyMatch(c -> c.value().equals("info"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("get"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("put"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("scan"));
     }
 
     @Test
@@ -152,31 +159,98 @@ class BricCompleterTest {
         assertThat(candidates).anyMatch(c -> c.value().equals("storage"));
     }
 
-    // --- Debug subcommand completion ---
+    // --- Segment completion for db get / db put / db scan ---
 
     @Test
-    void testCompleteDebugSubcommands() {
-        when(mockParsedLine.words()).thenReturn(Arrays.asList("debug", ""));
-        when(mockParsedLine.wordIndex()).thenReturn(1);
+    void testCompleteDbGetSegment() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("db", "get", ""));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates).anyMatch(c -> c.value().equals("ACCOUNT_INFO_STATE"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("TRIE_LOG_STORAGE"));
+    }
+
+    @Test
+    void testCompleteDbPutSegment() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("db", "put", ""));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates).anyMatch(c -> c.value().equals("ACCOUNT_INFO_STATE"));
+    }
+
+    @Test
+    void testCompleteDbScanSegment() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("db", "scan", ""));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates).anyMatch(c -> c.value().equals("ACCOUNT_INFO_STATE"));
+    }
+
+    @Test
+    void testCompleteDbGetSegmentWithPrefix() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("db", "get", "ACCOUNT"));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates).allMatch(c -> c.value().startsWith("ACCOUNT"));
+    }
+
+    @Test
+    void testCompleteDbGetSegmentFromOpenDatabase() {
+        when(mockDbManager.isOpen()).thenReturn(true);
+        when(mockDbManager.getColumnFamilyNames())
+            .thenReturn(Set.of("ACCOUNT_INFO_STATE", "TRIE_LOG_STORAGE", "default"));
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("db", "get", ""));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(3);
+        assertThat(candidates).anyMatch(c -> c.value().equals("default"));
+    }
+
+    @Test
+    void testCompleteDbScanFlags() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("db", "scan", "ACCOUNT_INFO_STATE", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(3);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).hasSize(3);
+        assertThat(candidates).anyMatch(c -> c.value().equals("--from"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("--limit"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("--offset"));
+    }
+
+    @Test
+    void testCompleteDbScanFlagNotSuggestedWhenAlreadyUsed() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("db", "scan", "ACCOUNT_INFO_STATE", "--limit", "10", "--"));
+        when(mockParsedLine.wordIndex()).thenReturn(5);
 
         List<Candidate> candidates = new ArrayList<>();
         completer.complete(mockReader, mockParsedLine, candidates);
 
         assertThat(candidates).hasSize(2);
-        assertThat(candidates).anyMatch(c -> c.value().equals("account"));
-        assertThat(candidates).anyMatch(c -> c.value().equals("storage"));
-    }
-
-    @Test
-    void testCompleteDebugSubcommandPartial() {
-        when(mockParsedLine.words()).thenReturn(Arrays.asList("debug", "ac"));
-        when(mockParsedLine.wordIndex()).thenReturn(1);
-
-        List<Candidate> candidates = new ArrayList<>();
-        completer.complete(mockReader, mockParsedLine, candidates);
-
-        assertThat(candidates).hasSize(1);
-        assertThat(candidates.get(0).value()).isEqualTo("account");
+        assertThat(candidates).anyMatch(c -> c.value().equals("--from"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("--offset"));
+        assertThat(candidates).noneMatch(c -> c.value().equals("--limit"));
     }
 
     // --- Flag completion ---
@@ -252,18 +326,6 @@ class BricCompleterTest {
         completer.complete(mockReader, mockParsedLine, candidates);
 
         // --raw already used, only --block should be offered
-        assertThat(candidates).hasSize(1);
-        assertThat(candidates.get(0).value()).isEqualTo("--block");
-    }
-
-    @Test
-    void testDebugFlagCompletion() {
-        when(mockParsedLine.words()).thenReturn(Arrays.asList("debug", "account", "0xaddr", "--"));
-        when(mockParsedLine.wordIndex()).thenReturn(3);
-
-        List<Candidate> candidates = new ArrayList<>();
-        completer.complete(mockReader, mockParsedLine, candidates);
-
         assertThat(candidates).hasSize(1);
         assertThat(candidates.get(0).value()).isEqualTo("--block");
     }

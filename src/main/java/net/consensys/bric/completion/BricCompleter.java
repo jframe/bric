@@ -22,8 +22,7 @@ public class BricCompleter implements Completer {
 
     private final BricCommandProcessor processor;
     private final FileNameCompleter fileCompleter;
-    private static final Set<String> DB_SUBCOMMANDS = Set.of("open", "close", "info");
-    private static final Set<String> DEBUG_SUBCOMMANDS = Set.of("account", "storage");
+    private static final Set<String> DB_SUBCOMMANDS = Set.of("open", "close", "info", "get", "put", "scan");
     private static final Set<String> EXIT_COMMANDS = Set.of("exit", "quit");
 
     private static final Set<String> SEGMENT_NAMES = Stream.of(KeyValueSegmentIdentifier.values())
@@ -37,8 +36,7 @@ public class BricCompleter implements Completer {
         "code", Set.of("--save", "--hash"),
         "trielog", Set.of("--address"),
         "trielog-compare", Set.of("--verbose"),
-        "debug", Set.of("--block"),
-        "scan", Set.of("--limit", "--offset")
+        "db-scan", Set.of("--from", "--limit", "--offset")
     );
 
     /** Flags that take a file path as their next argument. */
@@ -65,30 +63,19 @@ public class BricCompleter implements Completer {
         // Handle "db" subcommand completion
         if ("db".equals(command)) {
             if (wordIndex == 1) {
-                completeFromSet(words[1], DB_SUBCOMMANDS, candidates);
-            } else if (wordIndex >= 2 && words.length > 1 && "open".equals(words[1].toLowerCase())) {
-                fileCompleter.complete(reader, line, candidates);
-            }
-            return;
-        }
-
-        // Handle "debug" subcommand completion
-        if ("debug".equals(command)) {
-            if (wordIndex == 1) {
-                completeFromSet(words.length > 1 ? words[1] : "", DEBUG_SUBCOMMANDS, candidates);
+                completeFromSet(words.length > 1 ? words[1] : "", DB_SUBCOMMANDS, candidates);
                 return;
             }
-            // Flags for debug subcommands
-            completeFlags(words, wordIndex, command, reader, line, candidates);
-            return;
-        }
-
-        // Handle "scan" segment name completion
-        if ("scan".equals(command) && wordIndex == 1) {
-            String prefix = words.length > 1 ? words[1].toUpperCase() : "";
-            for (String segName : SEGMENT_NAMES) {
-                if (segName.startsWith(prefix)) {
-                    candidates.add(new Candidate(segName));
+            if (words.length > 1) {
+                String subcommand = words[1].toLowerCase();
+                if ("open".equals(subcommand)) {
+                    fileCompleter.complete(reader, line, candidates);
+                } else if ("get".equals(subcommand) || "put".equals(subcommand) || "scan".equals(subcommand)) {
+                    if (wordIndex == 2) {
+                        completeSegments(words.length > 2 ? words[2] : "", candidates);
+                    } else if ("scan".equals(subcommand)) {
+                        completeFlags(words, wordIndex, "db-scan", reader, line, candidates);
+                    }
                 }
             }
             return;
@@ -154,6 +141,22 @@ public class BricCompleter implements Completer {
         for (String exitCommand : EXIT_COMMANDS) {
             if (exitCommand.startsWith(prefix)) {
                 candidates.add(new Candidate(exitCommand));
+            }
+        }
+    }
+
+    /**
+     * Complete segment names, using the open database's actual column families when available,
+     * falling back to the known enum names.
+     */
+    private void completeSegments(String prefix, List<Candidate> candidates) {
+        Set<String> segments = processor.getDbManager().isOpen()
+            ? processor.getDbManager().getColumnFamilyNames()
+            : SEGMENT_NAMES;
+        String upperPrefix = prefix.toUpperCase();
+        for (String segName : segments) {
+            if (segName.toUpperCase().startsWith(upperPrefix)) {
+                candidates.add(new Candidate(segName));
             }
         }
     }
