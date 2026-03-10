@@ -6,7 +6,7 @@ import java.util.Arrays;
 
 /**
  * Parent command for database operations with subcommands.
- * Supports: db open, db close, db info
+ * Supports: db open, db close, db info, db get, db scan
  */
 public class DbCommand implements Command {
 
@@ -14,12 +14,16 @@ public class DbCommand implements Command {
     private final DbOpenCommand openCommand;
     private final DbCloseCommand closeCommand;
     private final DbInfoCommand infoCommand;
+    private final DbGetCommand getCommand;
+    private final ScanCommand scanCommand;
 
     public DbCommand(BesuDatabaseManager dbManager) {
         this.dbManager = dbManager;
         this.openCommand = new DbOpenCommand(dbManager);
         this.closeCommand = new DbCloseCommand(dbManager);
         this.infoCommand = new DbInfoCommand(dbManager);
+        this.getCommand = new DbGetCommand(dbManager);
+        this.scanCommand = new ScanCommand(dbManager);
     }
 
     @Override
@@ -43,6 +47,12 @@ public class DbCommand implements Command {
             case "info":
                 infoCommand.execute(subArgs);
                 break;
+            case "get":
+                getCommand.execute(subArgs);
+                break;
+            case "scan":
+                scanCommand.execute(subArgs);
+                break;
             default:
                 System.err.println("Error: Unknown subcommand '" + subcommand + "'");
                 System.err.println("Usage: " + getUsage());
@@ -52,15 +62,17 @@ public class DbCommand implements Command {
 
     @Override
     public String getHelp() {
-        return "Database operations (open, close, info)";
+        return "Database operations (open, close, info, get, scan)";
     }
 
     @Override
     public String getUsage() {
         return "db <subcommand> [args]\n" +
                "                               Subcommands:\n" +
-               "                                 db open <path>       - Open a database in read-only mode\n" +
-               "                                 db close             - Close the currently open database\n" +
-               "                                 db info              - Display database statistics";
+               "                                 db open <path>                          - Open a database in read-only mode\n" +
+               "                                 db close                                - Close the currently open database\n" +
+               "                                 db info                                 - Display database statistics\n" +
+               "                                 db get <segment> <hex-key>              - Retrieve a raw value by key\n" +
+               "                                 db scan <segment> [--limit n] [--offset n] - Scan raw key-value entries";
     }
 }
