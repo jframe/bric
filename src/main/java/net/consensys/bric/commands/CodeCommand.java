@@ -48,7 +48,7 @@ public class CodeCommand implements Command {
         boolean isHashQuery = false;
         for (int i = 1; i < args.length; i++) {
             if ("--save".equals(args[i]) && i + 1 < args.length) {
-                saveFilePath = args[i + 1];
+                saveFilePath = InputParser.stripQuotes(args[i + 1]);
                 i++; // skip the path argument
             } else if ("--hash".equals(args[i])) {
                 isHashQuery = true;

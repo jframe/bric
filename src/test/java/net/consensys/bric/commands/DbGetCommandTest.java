@@ -88,7 +88,7 @@ class DbGetCommandTest {
 
         command.execute(new String[]{"ACCOUNT_INFO_STATE", "notvalidhex"});
 
-        assertThat(errorStream.toString()).contains("Error: Invalid hex key");
+        assertThat(errorStream.toString()).contains("Error: Invalid key");
     }
 
     @Test
@@ -172,6 +172,6 @@ class DbGetCommandTest {
         String usage = command.getUsage();
         assertThat(usage).contains("db get");
         assertThat(usage).contains("<segment>");
-        assertThat(usage).contains("<hex-key>");
+        assertThat(usage).contains("<key>");
     }
 }

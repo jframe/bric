@@ -42,6 +42,7 @@ public class ScanCommand implements Command {
         String segmentName = args[0].toUpperCase();
         int limit = DEFAULT_LIMIT;
         int offset = 0;
+        byte[] fromKey = null;
 
         // Parse optional flags
         for (int i = 1; i < args.length; i++) {
@@ -69,6 +70,14 @@ public class ScanCommand implements Command {
                     return;
                 }
                 i++;
+            } else if ("--from".equals(args[i]) && i + 1 < args.length) {
+                try {
+                    fromKey = InputParser.parseKeyBytes(args[i + 1]);
+                } catch (IllegalArgumentException e) {
+                    System.err.println("Error: Invalid --from key: " + args[i + 1]);
+                    return;
+                }
+                i++;
             }
         }
 
@@ -88,14 +97,17 @@ public class ScanCommand implements Command {
             return;
         }
 
-        scanSegment(segment, offset, limit);
+        scanSegment(segment, offset, limit, fromKey);
     }
 
-    private void scanSegment(KeyValueSegmentIdentifier segment, int offset, int limit) {
+    private void scanSegment(KeyValueSegmentIdentifier segment, int offset, int limit, byte[] fromKey) {
         long estimatedKeys = segmentReader.countEstimated(segment);
 
         System.out.println("\nScan: " + segment.getName());
         System.out.println("Estimated keys: " + String.format("%,d", estimatedKeys));
+        if (fromKey != null) {
+            System.out.println("From: " + Bytes.wrap(fromKey).toHexString());
+        }
         if (offset > 0) {
             System.out.println("Offset: " + String.format("%,d", offset));
         }
@@ -107,7 +119,7 @@ public class ScanCommand implements Command {
         final int finalLimit = limit;
         final int finalOffset = offset;
 
-        segmentReader.iterateKeyValue(segment, (key, value) -> {
+        SegmentReader.KeyValueConsumer consumer = (key, value) -> {
             if (skipped[0] < finalOffset) {
                 skipped[0]++;
                 return;
@@ -123,7 +135,13 @@ public class ScanCommand implements Command {
                 (long) finalOffset + displayed[0], key.length, truncateHex(keyHex, 80));
             System.out.printf("    Value (%d bytes): %s%n",
                 value.length, truncateHex(Bytes.wrap(value).toHexString(), 80));
-        });
+        };
+
+        if (fromKey != null) {
+            segmentReader.iterateKeyValueFrom(segment, fromKey, consumer);
+        } else {
+            segmentReader.iterateKeyValue(segment, consumer);
+        }
 
         if (displayed[0] == 0) {
             System.out.println("(no entries found)");
@@ -178,11 +196,13 @@ public class ScanCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "scan <segment> [--limit <n>] [--offset <n>]\n" +
+        return "db scan <segment> [--from <key>] [--limit <n>] [--offset <n>]\n" +
                "                               Defaults: limit=20, offset=0\n" +
+               "                               Key formats: 0xdeadbeef (hex) or \"string\" (UTF-8)\n" +
                "                               Examples:\n" +
-               "                                 scan ACCOUNT_INFO_STATE\n" +
-               "                                 scan TRIE_LOG_STORAGE --limit 5\n" +
-               "                                 scan CODE_STORAGE --offset 100 --limit 10";
+               "                                 db scan ACCOUNT_INFO_STATE\n" +
+               "                                 db scan VARIABLES --from \"FLAT_DB_MODE\"\n" +
+               "                                 db scan TRIE_LOG_STORAGE --limit 5\n" +
+               "                                 db scan CODE_STORAGE --offset 100 --limit 10";
     }
 }

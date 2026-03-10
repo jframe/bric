@@ -55,9 +55,9 @@ public class DbGetCommand implements Command {
 
         byte[] key;
         try {
-            key = Bytes.fromHexString(keyHex).toArrayUnsafe();
+            key = InputParser.parseKeyBytes(keyHex);
         } catch (IllegalArgumentException e) {
-            System.err.println("Error: Invalid hex key: " + keyHex);
+            System.err.println("Error: Invalid key: " + keyHex);
             return;
         }
 
@@ -100,9 +100,10 @@ public class DbGetCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "db get <segment> <hex-key>\n" +
+        return "db get <segment> <key>\n" +
+               "                               Key formats: 0xdeadbeef (hex) or \"string\" (UTF-8)\n" +
                "                               Examples:\n" +
                "                                 db get ACCOUNT_INFO_STATE 0x1234abcd...\n" +
-               "                                 db get TRIE_LOG_STORAGE 1234abcd...";
+               "                                 db get VARIABLES \"FLAT_DB_MODE\"";
     }
 }

@@ -202,6 +202,29 @@ public class SegmentReader {
     }
 
     /**
+     * Iterate over keys and values in a segment, starting from the given key (inclusive).
+     */
+    public void iterateKeyValueFrom(
+        KeyValueSegmentIdentifier segment,
+        byte[] fromKey,
+        KeyValueConsumer consumer) {
+
+        ColumnFamilyHandle cfHandle = dbManager.getColumnFamily(segment);
+        if (cfHandle == null) {
+            LOG.warn("Column family not found: {}", segment.getName());
+            return;
+        }
+
+        try (RocksIterator iterator = dbManager.getDatabase().newIterator(cfHandle)) {
+            iterator.seek(fromKey);
+            while (iterator.isValid()) {
+                consumer.accept(iterator.key(), iterator.value());
+                iterator.next();
+            }
+        }
+    }
+
+    /**
      * Iterate with pagination support.
      */
     public void iterateWithLimit(

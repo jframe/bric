@@ -69,13 +69,13 @@ class BricCommandProcessorTest {
     @Test
     void testTokenizeDoubleQuotedPath() {
         assertThat(BricCommandProcessor.tokenize("db open \"/path/with spaces/db\""))
-                .containsExactly("db", "open", "/path/with spaces/db");
+                .containsExactly("db", "open", "\"/path/with spaces/db\"");
     }
 
     @Test
     void testTokenizeSingleQuotedPath() {
         assertThat(BricCommandProcessor.tokenize("db open '/path/with spaces/db'"))
-                .containsExactly("db", "open", "/path/with spaces/db");
+                .containsExactly("db", "open", "'/path/with spaces/db'");
     }
 
     @Test
@@ -93,6 +93,6 @@ class BricCommandProcessorTest {
     @Test
     void testTokenizeQuotedSaveFlag() {
         assertThat(BricCommandProcessor.tokenize("code 0xabc --save \"/my files/out.hex\""))
-                .containsExactly("code", "0xabc", "--save", "/my files/out.hex");
+                .containsExactly("code", "0xabc", "--save", "\"/my files/out.hex\"");
     }
 }

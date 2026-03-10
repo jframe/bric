@@ -21,7 +21,7 @@ public class DbOpenCommand implements Command {
             return;
         }
 
-        String path = args[0];
+        String path = InputParser.stripQuotes(args[0]);
 
         // Expand tilde to user home directory
         if (path.startsWith("~")) {

@@ -152,12 +152,14 @@ public class BricCommandProcessor {
 
             if (quote != 0) {
                 if (c == quote) {
+                    current.append(c); // preserve closing quote
                     quote = 0;
                 } else {
                     current.append(c);
                 }
             } else if (c == '"' || c == '\'') {
                 quote = c;
+                current.append(c); // preserve opening quote
             } else if (Character.isWhitespace(c)) {
                 if (current.length() > 0) {
                     tokens.add(current.toString());

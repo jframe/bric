@@ -58,17 +58,17 @@ public class DbPutCommand implements Command {
 
         byte[] key;
         try {
-            key = Bytes.fromHexString(keyHex).toArrayUnsafe();
+            key = InputParser.parseKeyBytes(keyHex);
         } catch (IllegalArgumentException e) {
-            System.err.println("Error: Invalid hex key: " + keyHex);
+            System.err.println("Error: Invalid key: " + keyHex);
             return;
         }
 
         byte[] value;
         try {
-            value = Bytes.fromHexString(valueHex).toArrayUnsafe();
+            value = InputParser.parseKeyBytes(valueHex);
         } catch (IllegalArgumentException e) {
-            System.err.println("Error: Invalid hex value: " + valueHex);
+            System.err.println("Error: Invalid value: " + valueHex);
             return;
         }
 
@@ -111,9 +111,10 @@ public class DbPutCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "db put <segment> <hex-key> <hex-value>\n" +
+        return "db put <segment> <key> <value>\n" +
+               "                               Key/value formats: 0xdeadbeef (hex) or \"string\" (UTF-8)\n" +
                "                               Examples:\n" +
                "                                 db put ACCOUNT_INFO_STATE 0x1234abcd... 0xdeadbeef...\n" +
-               "                                 db put TRIE_LOG_STORAGE 1234abcd... deadbeef...";
+               "                                 db put VARIABLES \"MY_KEY\" \"MY_VALUE\"";
     }
 }

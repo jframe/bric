@@ -104,7 +104,7 @@ class DbPutCommandTest {
 
         command.execute(new String[]{"ACCOUNT_INFO_STATE", "notvalidhex", "0x01"});
 
-        assertThat(errorStream.toString()).contains("Error: Invalid hex key");
+        assertThat(errorStream.toString()).contains("Error: Invalid key");
     }
 
     @Test
@@ -115,7 +115,7 @@ class DbPutCommandTest {
 
         command.execute(new String[]{"ACCOUNT_INFO_STATE", "0xdeadbeef", "notvalidhex"});
 
-        assertThat(errorStream.toString()).contains("Error: Invalid hex value");
+        assertThat(errorStream.toString()).contains("Error: Invalid value");
     }
 
     @Test
@@ -180,7 +180,7 @@ class DbPutCommandTest {
         String usage = command.getUsage();
         assertThat(usage).contains("db put");
         assertThat(usage).contains("<segment>");
-        assertThat(usage).contains("<hex-key>");
-        assertThat(usage).contains("<hex-value>");
+        assertThat(usage).contains("<key>");
+        assertThat(usage).contains("<value>");
     }
 }

@@ -167,6 +167,72 @@ class InputParserTest {
         assertThat(InputParser.isBlockNumber("hello")).isFalse();
     }
 
+    // --- parseKeyBytes ---
+
+    @Test
+    void parseKeyBytes_hex() {
+        byte[] result = InputParser.parseKeyBytes("0xdeadbeef");
+        assertThat(result).containsExactly(0xde, 0xad, 0xbe, 0xef);
+    }
+
+    @Test
+    void parseKeyBytes_hexWithoutPrefix() {
+        byte[] result = InputParser.parseKeyBytes("deadbeef");
+        assertThat(result).containsExactly(0xde, 0xad, 0xbe, 0xef);
+    }
+
+    @Test
+    void parseKeyBytes_doubleQuotedString() {
+        byte[] result = InputParser.parseKeyBytes("\"hello\"");
+        assertThat(result).isEqualTo("hello".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void parseKeyBytes_singleQuotedString() {
+        byte[] result = InputParser.parseKeyBytes("'hello'");
+        assertThat(result).isEqualTo("hello".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void parseKeyBytes_quotedStringWithSpaces() {
+        byte[] result = InputParser.parseKeyBytes("\"hello world\"");
+        assertThat(result).isEqualTo("hello world".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void parseKeyBytes_emptyQuotedString() {
+        byte[] result = InputParser.parseKeyBytes("\"\"");
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void parseKeyBytes_invalidHex() {
+        assertThatThrownBy(() -> InputParser.parseKeyBytes("notvalidhex"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // --- stripQuotes ---
+
+    @Test
+    void stripQuotes_doubleQuoted() {
+        assertThat(InputParser.stripQuotes("\"/path/to/db\"")).isEqualTo("/path/to/db");
+    }
+
+    @Test
+    void stripQuotes_singleQuoted() {
+        assertThat(InputParser.stripQuotes("'/path/to/db'")).isEqualTo("/path/to/db");
+    }
+
+    @Test
+    void stripQuotes_noQuotes() {
+        assertThat(InputParser.stripQuotes("/path/to/db")).isEqualTo("/path/to/db");
+    }
+
+    @Test
+    void stripQuotes_mismatchedQuotes() {
+        assertThat(InputParser.stripQuotes("\"/path/to/db'")).isEqualTo("\"/path/to/db'");
+    }
+
     // --- hasFlag ---
 
     @Test

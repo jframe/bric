@@ -1,10 +1,12 @@
 package net.consensys.bric.commands;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Shared input parsing and validation for REPL commands.
@@ -137,6 +139,38 @@ public final class InputParser {
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    /**
+     * Parse a raw key argument as bytes.
+     * If the argument is surrounded by single or double quotes, the inner string is
+     * converted to bytes using UTF-8 encoding. Otherwise it is parsed as a hex string.
+     *
+     * @throws IllegalArgumentException if the value is neither a valid quoted string nor valid hex
+     */
+    public static byte[] parseKeyBytes(String arg) {
+        if (arg.length() >= 2) {
+            char first = arg.charAt(0);
+            char last = arg.charAt(arg.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                return arg.substring(1, arg.length() - 1).getBytes(StandardCharsets.UTF_8);
+            }
+        }
+        return Bytes.fromHexString(arg).toArrayUnsafe();
+    }
+
+    /**
+     * Strip outer single or double quotes from a string if present.
+     */
+    public static String stripQuotes(String arg) {
+        if (arg.length() >= 2) {
+            char first = arg.charAt(0);
+            char last = arg.charAt(arg.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                return arg.substring(1, arg.length() - 1);
+            }
+        }
+        return arg;
     }
 
     /**
