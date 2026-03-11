@@ -269,10 +269,14 @@ public class BesuDatabaseManager {
         if (!isOpen) {
             throw new IllegalStateException("No database is open");
         }
+        if (!writable) {
+            throw new IllegalStateException("Database is open in read-only mode");
+        }
         ColumnFamilyHandle handle = handlesByName.get(cfName);
         if (handle == null) {
             throw new IllegalArgumentException("Column family not found: " + cfName);
         }
+        LOG.info("Dropping column family: {}", cfName);
         db.dropColumnFamily(handle);
         handlesByName.remove(cfName);
         columnFamilyHandles.remove(handle);
