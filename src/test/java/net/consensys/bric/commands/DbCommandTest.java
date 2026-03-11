@@ -118,4 +118,22 @@ class DbCommandTest {
         assertThat(usage).contains("db close");
         assertThat(usage).contains("db info");
     }
+
+    @Test
+    void testExecuteDropCfSubcommand() throws Exception {
+        when(mockDbManager.isOpen()).thenReturn(true);
+        when(mockDbManager.isWritable()).thenReturn(true);
+        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("TRIE_LOG_STORAGE"));
+
+        command.execute(new String[]{"drop-cf", "TRIE_LOG_STORAGE"});
+
+        verify(mockDbManager).dropColumnFamily("TRIE_LOG_STORAGE");
+        assertThat(outputStream.toString()).contains("Dropped column family");
+    }
+
+    @Test
+    void testGetUsageContainsDropCf() {
+        String usage = command.getUsage();
+        assertThat(usage).contains("db drop-cf");
+    }
 }
