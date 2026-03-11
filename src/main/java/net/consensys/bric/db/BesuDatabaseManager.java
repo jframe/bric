@@ -256,6 +256,29 @@ public class BesuDatabaseManager {
         db.put(handle, key, value);
     }
 
+    /**
+     * Drop a column family from the database.
+     * The handle is removed from internal tracking and closed.
+     *
+     * @param cfName the stored column family name (as returned by getColumnFamilyNames())
+     * @throws IllegalStateException    if no database is open
+     * @throws IllegalArgumentException if the column family is not found
+     * @throws RocksDBException         if RocksDB fails to drop the column family
+     */
+    public synchronized void dropColumnFamily(String cfName) throws RocksDBException {
+        if (!isOpen) {
+            throw new IllegalStateException("No database is open");
+        }
+        ColumnFamilyHandle handle = handlesByName.get(cfName);
+        if (handle == null) {
+            throw new IllegalArgumentException("Column family not found: " + cfName);
+        }
+        db.dropColumnFamily(handle);
+        handlesByName.remove(cfName);
+        columnFamilyHandles.remove(handle);
+        handle.close();
+    }
+
     public String getCurrentPath() {
         return currentPath;
     }
