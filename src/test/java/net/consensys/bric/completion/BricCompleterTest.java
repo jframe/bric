@@ -88,13 +88,14 @@ class BricCompleterTest {
         List<Candidate> candidates = new ArrayList<>();
         completer.complete(mockReader, mockParsedLine, candidates);
 
-        assertThat(candidates).hasSize(6);
+        assertThat(candidates).hasSize(7);
         assertThat(candidates).anyMatch(c -> c.value().equals("open"));
         assertThat(candidates).anyMatch(c -> c.value().equals("close"));
         assertThat(candidates).anyMatch(c -> c.value().equals("info"));
         assertThat(candidates).anyMatch(c -> c.value().equals("get"));
         assertThat(candidates).anyMatch(c -> c.value().equals("put"));
         assertThat(candidates).anyMatch(c -> c.value().equals("scan"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("drop-cf"));
     }
 
     @Test
@@ -223,6 +224,19 @@ class BricCompleterTest {
 
         assertThat(candidates).hasSize(3);
         assertThat(candidates).anyMatch(c -> c.value().equals("default"));
+    }
+
+    @Test
+    void testCompleteDbDropCfSegment() {
+        when(mockParsedLine.words()).thenReturn(Arrays.asList("db", "drop-cf", ""));
+        when(mockParsedLine.wordIndex()).thenReturn(2);
+
+        List<Candidate> candidates = new ArrayList<>();
+        completer.complete(mockReader, mockParsedLine, candidates);
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates).anyMatch(c -> c.value().equals("TRIE_LOG_STORAGE"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("ACCOUNT_INFO_STATE"));
     }
 
     @Test

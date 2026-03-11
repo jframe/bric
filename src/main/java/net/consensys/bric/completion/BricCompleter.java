@@ -22,7 +22,7 @@ public class BricCompleter implements Completer {
 
     private final BricCommandProcessor processor;
     private final FileNameCompleter fileCompleter;
-    private static final Set<String> DB_SUBCOMMANDS = Set.of("open", "close", "info", "get", "put", "scan");
+    private static final Set<String> DB_SUBCOMMANDS = Set.of("open", "close", "info", "get", "put", "scan", "drop-cf");
     private static final Set<String> EXIT_COMMANDS = Set.of("exit", "quit");
 
     private static final Set<String> SEGMENT_NAMES = Stream.of(KeyValueSegmentIdentifier.values())
@@ -75,6 +75,10 @@ public class BricCompleter implements Completer {
                         completeSegments(words.length > 2 ? words[2] : "", candidates);
                     } else if ("scan".equals(subcommand)) {
                         completeFlags(words, wordIndex, "db-scan", reader, line, candidates);
+                    }
+                } else if ("drop-cf".equals(subcommand)) {
+                    if (wordIndex == 2) {
+                        completeSegments(words.length > 2 ? words[2] : "", candidates);
                     }
                 }
             }
