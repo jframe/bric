@@ -4,10 +4,12 @@ import org.rocksdb.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.Arrays;
 
 /**
  * Manager for Besu RocksDB database connections.
@@ -211,6 +213,28 @@ public class BesuDatabaseManager {
             throw new IllegalStateException("No database is open");
         }
         return handlesByName.get(name);
+    }
+
+    /**
+     * Get column family handle by raw name bytes.
+     * Used when CF name is not a standard UTF-8 string or needs byte-exact lookup.
+     *
+     * @param cfNameBytes the column family name as bytes
+     * @return ColumnFamilyHandle if found, null otherwise
+     */
+    public ColumnFamilyHandle getColumnFamilyByNameBytes(byte[] cfNameBytes) {
+        if (!isOpen) {
+            throw new IllegalStateException("No database is open");
+        }
+
+        // Try exact match on stored handles
+        for (Map.Entry<String, ColumnFamilyHandle> entry : handlesByName.entrySet()) {
+            if (Arrays.equals(entry.getKey().getBytes(StandardCharsets.UTF_8), cfNameBytes)) {
+                return entry.getValue();
+            }
+        }
+
+        return null;
     }
 
     /**
