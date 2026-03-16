@@ -1,12 +1,9 @@
 package net.consensys.bric.commands;
 
 import net.consensys.bric.db.BesuDatabaseManager;
-import net.consensys.bric.db.KeyValueSegmentIdentifier;
-import org.apache.tuweni.bytes.Bytes;
+import net.consensys.bric.db.ColumnFamilyResolver;
 import org.rocksdb.ColumnFamilyHandle;
-
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import org.rocksdb.RocksDBException;
 
 /**
  * Command to write a raw value to a column family by key.
@@ -32,76 +29,56 @@ public class DbPutCommand implements Command {
         }
 
         if (args.length < 3) {
-            System.err.println("Error: Missing arguments");
+            System.err.println("Error: Missing segment, key, and/or value");
             System.err.println("Usage: " + getUsage());
-            System.err.println("\nAvailable segments: " + getAvailableSegments());
             return;
         }
 
-        String segmentName = args[0].toUpperCase();
+        String cfInput = args[0];
         String keyHex = args[1];
         String valueHex = args[2];
 
-        KeyValueSegmentIdentifier segment = resolveSegment(segmentName);
-        if (segment == null) {
-            System.err.println("Error: Unknown segment '" + segmentName + "'");
-            System.err.println("Available segments: " + getAvailableSegments());
-            return;
-        }
-
-        if (!dbManager.getColumnFamilyNames().contains(segment.getName())) {
-            System.err.println("Error: Segment '" + segment.getName() + "' is not present in this database");
-            System.err.println("Available in this database: " +
-                dbManager.getColumnFamilyNames().stream().sorted().collect(Collectors.joining(", ")));
-            return;
-        }
-
-        byte[] key;
+        // Resolve CF using ColumnFamilyResolver
+        ColumnFamilyHandle handle;
         try {
-            key = InputParser.parseKeyBytes(keyHex);
+            handle = ColumnFamilyResolver.resolveColumnFamily(dbManager, cfInput);
         } catch (IllegalArgumentException e) {
-            System.err.println("Error: Invalid key: " + keyHex);
+            System.err.println("Error: " + e.getMessage());
             return;
         }
 
-        byte[] value;
+        if (handle == null) {
+            System.err.println("Error: Column family not found: " + cfInput);
+            return;
+        }
+
+        // Parse key and value as hex
+        byte[] key, value;
         try {
-            value = InputParser.parseKeyBytes(valueHex);
+            key = ColumnFamilyResolver.parseInput(keyHex);
+            value = ColumnFamilyResolver.parseInput(valueHex);
         } catch (IllegalArgumentException e) {
-            System.err.println("Error: Invalid value: " + valueHex);
+            System.err.println("Error: Invalid key or value format: " + e.getMessage());
             return;
         }
 
+        // Write value to database
         try {
-            ColumnFamilyHandle handle = dbManager.getColumnFamily(segment);
-            dbManager.put(handle, key, value);
-            System.out.println("OK");
-            System.out.println("Key   (" + key.length + " bytes): " + Bytes.wrap(key).toHexString());
-            System.out.println("Value (" + value.length + " bytes): " + Bytes.wrap(value).toHexString());
-        } catch (Exception e) {
+            dbManager.getDatabase().put(handle, key, value);
+            System.out.println("Wrote to column family: " + cfInput);
+            System.out.println("Key: " + bytesToHex(key));
+            System.out.println("Value: " + bytesToHex(value));
+        } catch (RocksDBException e) {
             System.err.println("Error writing to database: " + e.getMessage());
         }
     }
 
-    private KeyValueSegmentIdentifier resolveSegment(String name) {
-        try {
-            return KeyValueSegmentIdentifier.valueOf(name);
-        } catch (IllegalArgumentException e) {
-            // Fall through to name comparison
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder("0x");
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
         }
-
-        for (KeyValueSegmentIdentifier seg : KeyValueSegmentIdentifier.values()) {
-            if (seg.getName().equalsIgnoreCase(name)) {
-                return seg;
-            }
-        }
-        return null;
-    }
-
-    private String getAvailableSegments() {
-        return Stream.of(KeyValueSegmentIdentifier.values())
-            .map(KeyValueSegmentIdentifier::getName)
-            .collect(Collectors.joining(", "));
+        return sb.toString();
     }
 
     @Override
@@ -111,10 +88,11 @@ public class DbPutCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "db put <segment> <key> <value>\n" +
-               "                               Key/value formats: 0xdeadbeef (hex) or \"string\" (UTF-8)\n" +
+        return "db put <segment|name|hex> <key-hex> <value-hex>\n" +
+               "                               Write a value to a column family (requires --write mode)\n" +
                "                               Examples:\n" +
-               "                                 db put ACCOUNT_INFO_STATE 0x1234abcd... 0xdeadbeef...\n" +
-               "                                 db put VARIABLES \"MY_KEY\" \"MY_VALUE\"";
+               "                                 db put TRIE_LOG_STORAGE 0xabcd 0xdeadbeef\n" +
+               "                                 db put \"CUSTOM_CF\" 0xabcd 0xdeadbeef\n" +
+               "                                 db put 0x0a 0xabcd 0xdeadbeef";
     }
 }
