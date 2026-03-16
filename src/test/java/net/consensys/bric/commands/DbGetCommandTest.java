@@ -50,7 +50,7 @@ class DbGetCommandTest {
 
         command.execute(new String[]{});
 
-        assertThat(errorStream.toString()).contains("Error: Missing arguments");
+        assertThat(errorStream.toString()).contains("Error: Missing segment and/or key");
     }
 
     @Test
@@ -59,7 +59,7 @@ class DbGetCommandTest {
 
         command.execute(new String[]{"ACCOUNT_INFO_STATE"});
 
-        assertThat(errorStream.toString()).contains("Error: Missing arguments");
+        assertThat(errorStream.toString()).contains("Error: Missing segment and/or key");
     }
 
     @Test
@@ -68,33 +68,33 @@ class DbGetCommandTest {
 
         command.execute(new String[]{"NONEXISTENT_SEGMENT", "0xabcd"});
 
-        assertThat(errorStream.toString()).contains("Error: Unknown segment 'NONEXISTENT_SEGMENT'");
+        assertThat(errorStream.toString()).contains("Error: Column family not found");
     }
 
     @Test
     void testSegmentNotInDatabase() {
         when(mockDbManager.isOpen()).thenReturn(true);
-        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("BLOCKCHAIN"));
 
-        command.execute(new String[]{"ACCOUNT_INFO_STATE", "0xabcd"});
+        command.execute(new String[]{"NONEXISTENT", "0xabcd"});
 
-        assertThat(errorStream.toString()).contains("Error: Segment 'ACCOUNT_INFO_STATE' is not present in this database");
+        assertThat(errorStream.toString()).contains("Error: Column family not found");
     }
 
     @Test
     void testInvalidHexKey() {
         when(mockDbManager.isOpen()).thenReturn(true);
-        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("ACCOUNT_INFO_STATE"));
 
-        command.execute(new String[]{"ACCOUNT_INFO_STATE", "notvalidhex"});
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+        when(mockDbManager.getColumnFamilyByName("ACCOUNT_INFO_STATE")).thenReturn(mockHandle);
 
-        assertThat(errorStream.toString()).contains("Error: Invalid key");
+        command.execute(new String[]{"ACCOUNT_INFO_STATE", "0xZZ"});
+
+        assertThat(errorStream.toString()).contains("Error: Invalid key format");
     }
 
     @Test
     void testKeyNotFound() throws RocksDBException {
         when(mockDbManager.isOpen()).thenReturn(true);
-        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("ACCOUNT_INFO_STATE"));
 
         ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
         RocksDB mockRocksDb = mock(RocksDB.class);
@@ -104,13 +104,12 @@ class DbGetCommandTest {
 
         command.execute(new String[]{"ACCOUNT_INFO_STATE", "0xdeadbeef"});
 
-        assertThat(outputStream.toString()).contains("Not found");
+        assertThat(outputStream.toString()).contains("Key not found");
     }
 
     @Test
     void testKeyFound() throws RocksDBException {
         when(mockDbManager.isOpen()).thenReturn(true);
-        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("ACCOUNT_INFO_STATE"));
 
         ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
         RocksDB mockRocksDb = mock(RocksDB.class);
@@ -121,16 +120,14 @@ class DbGetCommandTest {
         command.execute(new String[]{"ACCOUNT_INFO_STATE", "0xdeadbeef"});
 
         String output = outputStream.toString();
-        assertThat(output).contains("Key");
-        assertThat(output).contains("Value");
+        assertThat(output).contains("Key:");
+        assertThat(output).contains("Value:");
         assertThat(output).contains("0x010203");
-        assertThat(output).contains("3 bytes");
     }
 
     @Test
     void testSegmentNameCaseInsensitive() throws RocksDBException {
         when(mockDbManager.isOpen()).thenReturn(true);
-        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("ACCOUNT_INFO_STATE"));
 
         ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
         RocksDB mockRocksDb = mock(RocksDB.class);
@@ -140,14 +137,13 @@ class DbGetCommandTest {
 
         command.execute(new String[]{"account_info_state", "0xdeadbeef"});
 
-        assertThat(outputStream.toString()).contains("Value");
+        assertThat(outputStream.toString()).contains("Value:");
         assertThat(errorStream.toString()).doesNotContain("Error");
     }
 
     @Test
     void testKeyWithoutOxPrefix() throws RocksDBException {
         when(mockDbManager.isOpen()).thenReturn(true);
-        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("ACCOUNT_INFO_STATE"));
 
         ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
         RocksDB mockRocksDb = mock(RocksDB.class);
@@ -157,7 +153,7 @@ class DbGetCommandTest {
 
         command.execute(new String[]{"ACCOUNT_INFO_STATE", "deadbeef"});
 
-        assertThat(outputStream.toString()).contains("Value");
+        assertThat(outputStream.toString()).contains("Value:");
         assertThat(errorStream.toString()).doesNotContain("Error");
     }
 
@@ -171,7 +167,75 @@ class DbGetCommandTest {
     void testGetUsage() {
         String usage = command.getUsage();
         assertThat(usage).contains("db get");
-        assertThat(usage).contains("<segment>");
-        assertThat(usage).contains("<key>");
+        assertThat(usage).contains("<segment|name|hex>");
+        assertThat(usage).contains("<key-hex>");
+    }
+
+    @Test
+    void testGetFromArbitraryUTF8CF() throws RocksDBException {
+        when(mockDbManager.isOpen()).thenReturn(true);
+
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+        RocksDB mockRocksDb = mock(RocksDB.class);
+        when(mockDbManager.getColumnFamilyByName("CUSTOM_CF")).thenReturn(mockHandle);
+        when(mockDbManager.getDatabase()).thenReturn(mockRocksDb);
+        when(mockRocksDb.get(eq(mockHandle), any(byte[].class))).thenReturn(new byte[]{(byte) 0xaa, (byte) 0xbb, (byte) 0xcc});
+
+        command.execute(new String[]{"CUSTOM_CF", "0xabcdef"});
+
+        String output = outputStream.toString();
+        assertThat(output).contains("Key:");
+        assertThat(output).contains("Value:");
+        assertThat(output).contains("0xaabbcc");
+        assertThat(errorStream.toString()).doesNotContain("Error");
+    }
+
+    @Test
+    void testGetFromArbitraryHexCF() throws RocksDBException {
+        when(mockDbManager.isOpen()).thenReturn(true);
+
+        KeyValueSegmentIdentifier segment = KeyValueSegmentIdentifier.TRIE_LOG_STORAGE;
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+        RocksDB mockRocksDb = mock(RocksDB.class);
+        when(mockDbManager.getColumnFamily(segment)).thenReturn(mockHandle);
+        when(mockDbManager.getDatabase()).thenReturn(mockRocksDb);
+        when(mockRocksDb.get(eq(mockHandle), any(byte[].class))).thenReturn(new byte[]{(byte) 0x11, (byte) 0x22, (byte) 0x33});
+
+        // Use hex representation of TRIE_LOG_STORAGE ID (0x0a)
+        command.execute(new String[]{"0x0a", "0xdeadbeef"});
+
+        String output = outputStream.toString();
+        assertThat(output).contains("Key:");
+        assertThat(output).contains("Value:");
+        assertThat(output).contains("0x112233");
+        assertThat(errorStream.toString()).doesNotContain("Error");
+    }
+
+    @Test
+    void testGetKeyNotFoundWithArbitraryName() throws RocksDBException {
+        when(mockDbManager.isOpen()).thenReturn(true);
+
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+        RocksDB mockRocksDb = mock(RocksDB.class);
+        when(mockDbManager.getColumnFamilyByName("CUSTOM_CF")).thenReturn(mockHandle);
+        when(mockDbManager.getDatabase()).thenReturn(mockRocksDb);
+        when(mockRocksDb.get(eq(mockHandle), any(byte[].class))).thenReturn(null);
+
+        command.execute(new String[]{"CUSTOM_CF", "0x0102"});
+
+        assertThat(outputStream.toString()).contains("Key not found");
+        assertThat(errorStream.toString()).doesNotContain("Error");
+    }
+
+    @Test
+    void testGetInvalidKeyHex() {
+        when(mockDbManager.isOpen()).thenReturn(true);
+
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+        when(mockDbManager.getColumnFamily(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE)).thenReturn(mockHandle);
+
+        command.execute(new String[]{"ACCOUNT_INFO_STATE", "0xZZ"});
+
+        assertThat(errorStream.toString()).contains("Error").contains("Invalid key format");
     }
 }
