@@ -6,7 +6,11 @@ import java.util.Arrays;
 
 /**
  * Parent command for database operations with subcommands.
- * Supports: db open, db close, db info, db get, db scan
+ * Supports: db open, db close, db info, db get, db put, db scan, db drop-cf
+ *
+ * The db get, db put, db scan, and db drop-cf commands support arbitrary column families,
+ * which can be specified as predefined segment names (ACCOUNT_INFO_STATE, etc.), UTF-8 names,
+ * or hex IDs (e.g., 0x06, {6}).
  */
 public class DbCommand implements Command {
 
@@ -72,7 +76,7 @@ public class DbCommand implements Command {
 
     @Override
     public String getHelp() {
-        return "Database operations (open, close, info, get, put, scan, drop-cf)";
+        return "Database operations with arbitrary column family support";
     }
 
     @Override
@@ -85,6 +89,11 @@ public class DbCommand implements Command {
                "                                 db get <segment> <hex-key>                 - Retrieve a raw value by key\n" +
                "                                 db put <segment> <hex-key> <hex-value>     - Write a raw value by key (requires --write)\n" +
                "                                 db scan <segment> [--limit n] [--offset n] - Scan raw key-value entries\n" +
-               "                                 db drop-cf <segment>                               - Drop a column family (requires --write)";
+               "                                 db drop-cf <segment>                       - Drop a column family (requires --write)\n" +
+               "\n" +
+               "                               Column Family Formats (<segment>):\n" +
+               "                                 Predefined segment names (ACCOUNT_INFO_STATE, CODE_STORAGE, etc.)\n" +
+               "                                 UTF-8 names (any custom column family name)\n" +
+               "                                 Hex IDs (0x06, {6}, or raw 1-byte/4-byte representations)";
     }
 }
