@@ -5,6 +5,7 @@ import net.consensys.bric.db.BesuDatabaseManager.DatabaseFormat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.rocksdb.ColumnFamilyHandle;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -124,6 +125,8 @@ class DbCommandTest {
         when(mockDbManager.isOpen()).thenReturn(true);
         when(mockDbManager.isWritable()).thenReturn(true);
         when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("TRIE_LOG_STORAGE"));
+        ColumnFamilyHandle mockHandle = Mockito.mock(ColumnFamilyHandle.class);
+        when(mockDbManager.getColumnFamilyByName("TRIE_LOG_STORAGE")).thenReturn(mockHandle);
 
         command.execute(new String[]{"drop-cf", "TRIE_LOG_STORAGE"});
 
