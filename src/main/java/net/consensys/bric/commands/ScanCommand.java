@@ -1,9 +1,12 @@
 package net.consensys.bric.commands;
 
 import net.consensys.bric.db.BesuDatabaseManager;
+import net.consensys.bric.db.ColumnFamilyResolver;
 import net.consensys.bric.db.KeyValueSegmentIdentifier;
 import net.consensys.bric.db.SegmentReader;
 import org.apache.tuweni.bytes.Bytes;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.RocksIterator;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -33,160 +36,75 @@ public class ScanCommand implements Command {
         }
 
         if (args.length < 1) {
-            System.err.println("Error: Missing segment name");
+            System.err.println("Error: Missing segment");
             System.err.println("Usage: " + getUsage());
-            System.err.println("\nAvailable segments: " + getAvailableSegments());
             return;
         }
 
-        String segmentName = args[0].toUpperCase();
-        int limit = DEFAULT_LIMIT;
-        int offset = 0;
-        byte[] fromKey = null;
+        String cfInput = args[0];
+        int limit = Integer.MAX_VALUE;
 
-        // Parse optional flags
+        // Parse optional --limit flag
         for (int i = 1; i < args.length; i++) {
             if ("--limit".equals(args[i]) && i + 1 < args.length) {
                 try {
-                    limit = Integer.parseInt(args[i + 1]);
-                    if (limit < 1) {
-                        System.err.println("Error: Limit must be at least 1");
+                    int parsedLimit = Integer.parseInt(args[i + 1]);
+                    if (parsedLimit < 1) {
+                        System.err.println("Error: Invalid limit value: " + args[i + 1]);
                         return;
                     }
+                    limit = parsedLimit;
                 } catch (NumberFormatException e) {
                     System.err.println("Error: Invalid limit value: " + args[i + 1]);
                     return;
                 }
-                i++;
-            } else if ("--offset".equals(args[i]) && i + 1 < args.length) {
-                try {
-                    offset = Integer.parseInt(args[i + 1]);
-                    if (offset < 0) {
-                        System.err.println("Error: Offset cannot be negative");
-                        return;
-                    }
-                } catch (NumberFormatException e) {
-                    System.err.println("Error: Invalid offset value: " + args[i + 1]);
-                    return;
-                }
-                i++;
-            } else if ("--from".equals(args[i]) && i + 1 < args.length) {
-                try {
-                    fromKey = InputParser.parseKeyBytes(args[i + 1]);
-                } catch (IllegalArgumentException e) {
-                    System.err.println("Error: Invalid --from key: " + args[i + 1]);
-                    return;
-                }
-                i++;
+                i++; // Skip next arg
             }
         }
 
-        // Resolve the segment
-        KeyValueSegmentIdentifier segment = resolveSegment(segmentName);
-        if (segment == null) {
-            System.err.println("Error: Unknown segment '" + segmentName + "'");
-            System.err.println("Available segments: " + getAvailableSegments());
-            return;
-        }
-
-        // Check that the column family exists in the open database
-        if (!dbManager.getColumnFamilyNames().contains(segment.getName())) {
-            System.err.println("Error: Segment '" + segment.getName() + "' is not present in this database");
-            System.err.println("Available in this database: " +
-                dbManager.getColumnFamilyNames().stream().sorted().collect(Collectors.joining(", ")));
-            return;
-        }
-
-        scanSegment(segment, offset, limit, fromKey);
-    }
-
-    private void scanSegment(KeyValueSegmentIdentifier segment, int offset, int limit, byte[] fromKey) {
-        long estimatedKeys = segmentReader.countEstimated(segment);
-
-        System.out.println("\nScan: " + segment.getName());
-        System.out.println("Estimated keys: " + String.format("%,d", estimatedKeys));
-        if (fromKey != null) {
-            System.out.println("From: " + Bytes.wrap(fromKey).toHexString());
-        }
-        if (offset > 0) {
-            System.out.println("Offset: " + String.format("%,d", offset));
-        }
-        System.out.println("Limit: " + limit);
-        System.out.println();
-
-        int[] displayed = {0};
-        int[] skipped = {0};
-        final int finalLimit = limit;
-        final int finalOffset = offset;
-
-        SegmentReader.KeyValueConsumer consumer = (key, value) -> {
-            if (skipped[0] < finalOffset) {
-                skipped[0]++;
-                return;
-            }
-            if (displayed[0] >= finalLimit) {
-                return;
-            }
-            displayed[0]++;
-
-            String keyHex = Bytes.wrap(key).toHexString();
-
-            System.out.printf("[%d] Key (%d bytes): %s%n",
-                (long) finalOffset + displayed[0], key.length, truncateHex(keyHex, 80));
-            System.out.printf("    Value (%d bytes): %s%n",
-                value.length, truncateHex(Bytes.wrap(value).toHexString(), 80));
-        };
-
-        if (fromKey != null) {
-            segmentReader.iterateKeyValueFrom(segment, fromKey, consumer);
-        } else {
-            segmentReader.iterateKeyValue(segment, consumer);
-        }
-
-        if (displayed[0] == 0) {
-            System.out.println("(no entries found)");
-        } else {
-            System.out.println();
-            System.out.println("Displayed " + displayed[0] + " entries" +
-                (offset > 0 ? " (starting from offset " + offset + ")" : ""));
-        }
-    }
-
-    /**
-     * Truncate a hex string for display, showing start and end.
-     */
-    private String truncateHex(String hex, int maxLen) {
-        if (hex.length() <= maxLen) {
-            return hex;
-        }
-        int keep = (maxLen - 3) / 2;
-        return hex.substring(0, keep) + "..." + hex.substring(hex.length() - keep);
-    }
-
-    /**
-     * Resolve a segment name (case-insensitive, supports short aliases).
-     */
-    private KeyValueSegmentIdentifier resolveSegment(String name) {
-        // Try exact enum match first
+        // Resolve CF using ColumnFamilyResolver
+        ColumnFamilyHandle handle;
         try {
-            return KeyValueSegmentIdentifier.valueOf(name);
+            handle = ColumnFamilyResolver.resolveColumnFamily(dbManager, cfInput);
         } catch (IllegalArgumentException e) {
-            // Fall through to alias matching
+            System.err.println("Error: " + e.getMessage());
+            return;
         }
 
-        // Support short aliases
-        for (KeyValueSegmentIdentifier seg : KeyValueSegmentIdentifier.values()) {
-            if (seg.getName().equalsIgnoreCase(name)) {
-                return seg;
-            }
+        if (handle == null) {
+            System.err.println("Error: Column family not found: " + cfInput);
+            return;
         }
-        return null;
+
+        // Scan and display
+        try (RocksIterator iterator = dbManager.getDatabase().newIterator(handle)) {
+            iterator.seekToFirst();
+            int count = 0;
+            while (iterator.isValid() && count < limit) {
+                byte[] key = iterator.key();
+                byte[] value = iterator.value();
+                System.out.println("Key: " + bytesToHex(key) + " -> Value: " + bytesToHex(value));
+                iterator.next();
+                count++;
+            }
+            if (count == 0) {
+                System.out.println("(no entries found)");
+            } else if (count >= limit && iterator.isValid()) {
+                System.out.println("(Limited to " + limit + " entries)");
+            } else if (count > 0) {
+                System.out.println("Displayed " + count + " entries");
+            }
+        } catch (Exception e) {
+            System.err.println("Error scanning column family: " + e.getMessage());
+        }
     }
 
-    private String getAvailableSegments() {
-        return Stream.of(KeyValueSegmentIdentifier.values())
-            .map(KeyValueSegmentIdentifier::getName)
-            .collect(Collectors.joining(", "));
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder("0x");
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
     @Override
@@ -196,13 +114,11 @@ public class ScanCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "db scan <segment> [--from <key>] [--limit <n>] [--offset <n>]\n" +
-               "                               Defaults: limit=20, offset=0\n" +
-               "                               Key formats: 0xdeadbeef (hex) or \"string\" (UTF-8)\n" +
+        return "db scan <segment|name|hex> [--limit <count>]\n" +
+               "                               Scan entries in a column family\n" +
                "                               Examples:\n" +
-               "                                 db scan ACCOUNT_INFO_STATE\n" +
-               "                                 db scan VARIABLES --from \"FLAT_DB_MODE\"\n" +
-               "                                 db scan TRIE_LOG_STORAGE --limit 5\n" +
-               "                                 db scan CODE_STORAGE --offset 100 --limit 10";
+               "                                 db scan TRIE_LOG_STORAGE\n" +
+               "                                 db scan \"CUSTOM_CF\" --limit 10\n" +
+               "                                 db scan 0x0a --limit 5";
     }
 }
