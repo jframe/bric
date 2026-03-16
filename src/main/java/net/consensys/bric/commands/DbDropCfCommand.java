@@ -1,10 +1,10 @@
 package net.consensys.bric.commands;
 
 import net.consensys.bric.db.BesuDatabaseManager;
-import net.consensys.bric.db.KeyValueSegmentIdentifier;
+import net.consensys.bric.db.ColumnFamilyResolver;
+import org.rocksdb.ColumnFamilyHandle;
 
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Command to drop a column family from the open RocksDB database.
@@ -42,48 +42,45 @@ public class DbDropCfCommand implements Command {
             return;
         }
 
-        String segmentName = args[0].toUpperCase();
-        KeyValueSegmentIdentifier segment = resolveSegment(segmentName);
-        if (segment == null) {
-            System.err.println("Error: Unknown segment '" + segmentName + "'");
-            System.err.println("Available segments: " + getAvailableSegments());
+        String input = args[0];
+
+        // Try to resolve CF using ColumnFamilyResolver
+        ColumnFamilyHandle handle;
+        try {
+            handle = ColumnFamilyResolver.resolveColumnFamily(dbManager, input);
+        } catch (IllegalArgumentException e) {
+            System.err.println("Error: " + e.getMessage());
             return;
         }
 
-        String cfName = segment.getName();
-        if (!dbManager.getColumnFamilyNames().contains(cfName)) {
-            System.err.println("Error: Segment '" + cfName + "' is not present in this database");
+        if (handle == null) {
+            System.err.println("Error: Column family not found: " + input);
             System.err.println("Available in this database: " +
                 dbManager.getColumnFamilyNames().stream().sorted().collect(Collectors.joining(", ")));
             return;
         }
 
+        // Get the actual CF name to drop (reverse lookup from handle)
+        String cfNameToDrop = null;
+        for (String cfName : dbManager.getColumnFamilyNames()) {
+            ColumnFamilyHandle testHandle = dbManager.getColumnFamilyByName(cfName);
+            if (testHandle == handle) {
+                cfNameToDrop = cfName;
+                break;
+            }
+        }
+
+        if (cfNameToDrop == null) {
+            System.err.println("Error: Could not identify column family name");
+            return;
+        }
+
         try {
-            dbManager.dropColumnFamily(cfName);
-            System.out.println("Dropped column family: " + cfName);
+            dbManager.dropColumnFamily(cfNameToDrop);
+            System.out.println("Dropped column family: " + cfNameToDrop);
         } catch (Exception e) {
             System.err.println("Error: Failed to drop column family: " + e.getMessage());
         }
-    }
-
-    private KeyValueSegmentIdentifier resolveSegment(String name) {
-        try {
-            return KeyValueSegmentIdentifier.valueOf(name);
-        } catch (IllegalArgumentException e) {
-            // fall through
-        }
-        for (KeyValueSegmentIdentifier seg : KeyValueSegmentIdentifier.values()) {
-            if (seg.getName().equalsIgnoreCase(name)) {
-                return seg;
-            }
-        }
-        return null;
-    }
-
-    private String getAvailableSegments() {
-        return Stream.of(KeyValueSegmentIdentifier.values())
-            .map(KeyValueSegmentIdentifier::getName)
-            .collect(Collectors.joining(", "));
     }
 
     @Override
@@ -93,9 +90,11 @@ public class DbDropCfCommand implements Command {
 
     @Override
     public String getUsage() {
-        return "db drop-cf <segment>\n" +
+        return "db drop-cf <segment|name|hex>\n" +
+               "                               Drop a column family (requires --write mode)\n" +
                "                               Examples:\n" +
-               "                                 db drop-cf TRIE_LOG_STORAGE\n" +
-               "                                 db drop-cf ACCOUNT_INFO_STATE_ARCHIVE";
+               "                                 db drop-cf TRIE_LOG_STORAGE (enum)\n" +
+               "                                 db drop-cf \"CUSTOM_CF\" (UTF-8 name)\n" +
+               "                                 db drop-cf 0x0a (hex ID)";
     }
 }
