@@ -1,5 +1,7 @@
 package net.consensys.bric.db;
 
+import org.rocksdb.ColumnFamilyHandle;
+
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -70,5 +72,71 @@ public class ColumnFamilyResolver {
         }
 
         return bytes;
+    }
+
+    /**
+     * Resolve column family handle from various input formats.
+     * Tries resolution in this order:
+     * 1. By enum name (KeyValueSegmentIdentifier.valueOf)
+     * 2. By enum ID (KeyValueSegmentIdentifier.fromId)
+     * 3. By arbitrary CF name (as UTF-8 string)
+     *
+     * @param dbManager The database manager instance
+     * @param input The input string (enum name, hex ID, or arbitrary CF name)
+     * @return The column family handle, or null if not found
+     * @throws IllegalStateException if database is not open
+     * @throws IllegalArgumentException if input format is invalid (e.g., bad hex)
+     */
+    public static ColumnFamilyHandle resolveColumnFamily(
+            BesuDatabaseManager dbManager, String input) {
+
+        // Check if database is open
+        if (!dbManager.isOpen()) {
+            throw new IllegalStateException("No database is open");
+        }
+
+        // Parse input (will throw IllegalArgumentException for invalid hex)
+        byte[] parsedBytes = parseInput(input);
+        String inputUpper = input;
+
+        // Remove quotes if present for enum lookup
+        if (inputUpper.startsWith("\"") && inputUpper.endsWith("\"")) {
+            inputUpper = inputUpper.substring(1, inputUpper.length() - 1);
+        }
+        inputUpper = inputUpper.toUpperCase();
+
+        // Strategy 1: Try enum by name
+        try {
+            KeyValueSegmentIdentifier segment = KeyValueSegmentIdentifier.valueOf(inputUpper);
+            ColumnFamilyHandle handle = dbManager.getColumnFamily(segment);
+            if (handle != null) {
+                return handle;
+            }
+        } catch (IllegalArgumentException e) {
+            // Not a valid enum name, continue to next strategy
+        }
+
+        // Strategy 2: Try enum by ID (hex lookup)
+        KeyValueSegmentIdentifier segment = KeyValueSegmentIdentifier.fromId(parsedBytes);
+        if (segment != null) {
+            ColumnFamilyHandle handle = dbManager.getColumnFamily(segment);
+            if (handle != null) {
+                return handle;
+            }
+        }
+
+        // Strategy 3: Try arbitrary CF name (convert parsed bytes to UTF-8 string)
+        try {
+            String cfName = new String(parsedBytes, StandardCharsets.UTF_8);
+            ColumnFamilyHandle handle = dbManager.getColumnFamilyByName(cfName);
+            if (handle != null) {
+                return handle;
+            }
+        } catch (Exception e) {
+            // Not valid UTF-8, continue
+        }
+
+        // Not found
+        return null;
     }
 }

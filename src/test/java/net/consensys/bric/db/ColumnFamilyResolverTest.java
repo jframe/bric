@@ -1,9 +1,13 @@
 package net.consensys.bric.db;
 
 import org.junit.jupiter.api.Test;
+import org.rocksdb.ColumnFamilyHandle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for ColumnFamilyResolver hex/UTF-8 parsing functionality.
@@ -209,5 +213,122 @@ class ColumnFamilyResolverTest {
     void testParseHexAllFs() {
         byte[] result = ColumnFamilyResolver.parseInput("0xffffffff");
         assertThat(result).isEqualTo(new byte[] {(byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff});
+    }
+
+    // ============================================================================
+    // Resolution Tests (resolveColumnFamily method)
+    // ============================================================================
+
+    @Test
+    void testResolveByEnumName() throws Exception {
+        // Arrange
+        BesuDatabaseManager dbManager = mock(BesuDatabaseManager.class);
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+
+        when(dbManager.isOpen()).thenReturn(true);
+        when(dbManager.getColumnFamily(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE))
+            .thenReturn(mockHandle);
+
+        // Act
+        ColumnFamilyHandle result = ColumnFamilyResolver.resolveColumnFamily(dbManager, "TRIE_LOG_STORAGE");
+
+        // Assert
+        assertThat(result).isNotNull().isEqualTo(mockHandle);
+    }
+
+    @Test
+    void testResolveByEnumId() throws Exception {
+        // Arrange
+        BesuDatabaseManager dbManager = mock(BesuDatabaseManager.class);
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+
+        when(dbManager.isOpen()).thenReturn(true);
+        when(dbManager.getColumnFamily(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE))
+            .thenReturn(mockHandle);
+
+        // Act
+        ColumnFamilyHandle result = ColumnFamilyResolver.resolveColumnFamily(dbManager, "0x0a");
+
+        // Assert
+        assertThat(result).isNotNull().isEqualTo(mockHandle);
+    }
+
+    @Test
+    void testResolveByArbitraryName() throws Exception {
+        // Arrange
+        BesuDatabaseManager dbManager = mock(BesuDatabaseManager.class);
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+
+        when(dbManager.isOpen()).thenReturn(true);
+        when(dbManager.getColumnFamily(any(KeyValueSegmentIdentifier.class)))
+            .thenReturn(null);
+        when(dbManager.getColumnFamilyByName("CUSTOM_CF"))
+            .thenReturn(mockHandle);
+
+        // Act
+        ColumnFamilyHandle result = ColumnFamilyResolver.resolveColumnFamily(dbManager, "CUSTOM_CF");
+
+        // Assert
+        assertThat(result).isNotNull().isEqualTo(mockHandle);
+    }
+
+    @Test
+    void testResolveQuotedString() throws Exception {
+        // Arrange
+        BesuDatabaseManager dbManager = mock(BesuDatabaseManager.class);
+        ColumnFamilyHandle mockHandle = mock(ColumnFamilyHandle.class);
+
+        when(dbManager.isOpen()).thenReturn(true);
+        when(dbManager.getColumnFamily(any(KeyValueSegmentIdentifier.class)))
+            .thenReturn(null);
+        when(dbManager.getColumnFamilyByName("MY_CUSTOM_CF"))
+            .thenReturn(mockHandle);
+
+        // Act
+        ColumnFamilyHandle result = ColumnFamilyResolver.resolveColumnFamily(dbManager, "\"MY_CUSTOM_CF\"");
+
+        // Assert
+        assertThat(result).isNotNull().isEqualTo(mockHandle);
+    }
+
+    @Test
+    void testResolveNotFound() throws Exception {
+        // Arrange
+        BesuDatabaseManager dbManager = mock(BesuDatabaseManager.class);
+
+        when(dbManager.isOpen()).thenReturn(true);
+        when(dbManager.getColumnFamily(any(KeyValueSegmentIdentifier.class)))
+            .thenReturn(null);
+        when(dbManager.getColumnFamilyByName("NONEXISTENT"))
+            .thenReturn(null);
+
+        // Act
+        ColumnFamilyHandle result = ColumnFamilyResolver.resolveColumnFamily(dbManager, "NONEXISTENT");
+
+        // Assert
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void testResolveDatabaseNotOpen() throws Exception {
+        // Arrange
+        BesuDatabaseManager dbManager = mock(BesuDatabaseManager.class);
+
+        when(dbManager.isOpen()).thenReturn(false);
+
+        // Act & Assert
+        assertThatThrownBy(() -> ColumnFamilyResolver.resolveColumnFamily(dbManager, "TRIE_LOG_STORAGE"))
+            .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void testResolveInvalidHexFormat() throws Exception {
+        // Arrange
+        BesuDatabaseManager dbManager = mock(BesuDatabaseManager.class);
+        when(dbManager.isOpen()).thenReturn(true);
+
+        // Act & Assert
+        assertThatThrownBy(() -> ColumnFamilyResolver.resolveColumnFamily(dbManager, "0xgg"))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 }
