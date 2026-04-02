@@ -75,7 +75,7 @@ public class DbStatsCommand implements Command {
 
         printProperty(db, handle, "rocksdb.stats", "RocksDB Stats");
         printProperty(db, handle, "rocksdb.levelstats", "Level Stats");
-        printProperty(db, handle, "rocksdb.sstables", "SST Files");
+        printPropertyFiltered(db, handle, "rocksdb.sstables", "SST Files", "blob_file_number:");
     }
 
     private void printProperty(RocksDB db, ColumnFamilyHandle handle,
@@ -85,6 +85,35 @@ public class DbStatsCommand implements Command {
             if (value != null && !value.isBlank()) {
                 System.out.println("\n--- " + label + " ---");
                 System.out.println(value);
+            }
+        } catch (RocksDBException e) {
+            System.out.println("\n--- " + label + " (unavailable) ---");
+        }
+    }
+
+    private void printPropertyFiltered(RocksDB db, ColumnFamilyHandle handle,
+                                       String property, String label, String... excludePrefixes) {
+        try {
+            String value = db.getProperty(handle, property);
+            if (value != null && !value.isBlank()) {
+                StringBuilder filtered = new StringBuilder();
+                for (String line : value.split("\n")) {
+                    boolean exclude = false;
+                    for (String prefix : excludePrefixes) {
+                        if (line.trim().startsWith(prefix)) {
+                            exclude = true;
+                            break;
+                        }
+                    }
+                    if (!exclude) {
+                        filtered.append(line).append("\n");
+                    }
+                }
+                String result = filtered.toString().stripTrailing();
+                if (!result.isBlank()) {
+                    System.out.println("\n--- " + label + " ---");
+                    System.out.println(result);
+                }
             }
         } catch (RocksDBException e) {
             System.out.println("\n--- " + label + " (unavailable) ---");
