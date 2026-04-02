@@ -6,6 +6,8 @@ import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 
+import java.util.function.Predicate;
+
 public class DbStatsCommand implements Command {
 
     private final BesuDatabaseManager dbManager;
@@ -75,7 +77,9 @@ public class DbStatsCommand implements Command {
 
         printProperty(db, handle, "rocksdb.stats", "RocksDB Stats");
         printProperty(db, handle, "rocksdb.levelstats", "Level Stats");
-        printPropertyFiltered(db, handle, "rocksdb.sstables", "SST Files", "blob_file_number:");
+        printPropertyFiltered(db, handle, "rocksdb.sstables", "SST Files",
+            line -> line.trim().startsWith("blob_file_number:")
+                 || line.trim().matches("\\d+:\\d+\\[.*"));
     }
 
     private void printProperty(RocksDB db, ColumnFamilyHandle handle,
@@ -92,20 +96,14 @@ public class DbStatsCommand implements Command {
     }
 
     private void printPropertyFiltered(RocksDB db, ColumnFamilyHandle handle,
-                                       String property, String label, String... excludePrefixes) {
+                                       String property, String label,
+                                       Predicate<String> excludeLine) {
         try {
             String value = db.getProperty(handle, property);
             if (value != null && !value.isBlank()) {
                 StringBuilder filtered = new StringBuilder();
                 for (String line : value.split("\n")) {
-                    boolean exclude = false;
-                    for (String prefix : excludePrefixes) {
-                        if (line.trim().startsWith(prefix)) {
-                            exclude = true;
-                            break;
-                        }
-                    }
-                    if (!exclude) {
+                    if (!excludeLine.test(line)) {
                         filtered.append(line).append("\n");
                     }
                 }
