@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -313,6 +314,49 @@ public class BesuDatabaseManager {
 
     public DatabaseFormat getFormat() {
         return format;
+    }
+
+    /**
+     * Parse max_open_files from the RocksDB OPTIONS file in the current database directory.
+     * Returns -1 if the value is unlimited, not found, or the file cannot be read.
+     */
+    public int getMaxOpenFiles() {
+        if (!isOpen) {
+            throw new IllegalStateException("No database is open");
+        }
+        try {
+            long latestSeq = -1;
+            Path latestOptions = null;
+            try (DirectoryStream<Path> stream =
+                    Files.newDirectoryStream(Paths.get(currentPath), "OPTIONS-*")) {
+                for (Path p : stream) {
+                    String name = p.getFileName().toString();
+                    try {
+                        long seq = Long.parseLong(name.substring("OPTIONS-".length()));
+                        if (seq > latestSeq) {
+                            latestSeq = seq;
+                            latestOptions = p;
+                        }
+                    } catch (NumberFormatException e) {
+                        // skip non-numeric suffixes
+                    }
+                }
+            }
+            if (latestOptions == null) {
+                return -1;
+            }
+            for (String line : Files.readAllLines(latestOptions)) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("max_open_files=")) {
+                    int value = Integer.parseInt(
+                        trimmed.substring("max_open_files=".length()).trim());
+                    return value;
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Could not parse max_open_files from OPTIONS file: {}", e.getMessage());
+        }
+        return -1;
     }
 
     /**
