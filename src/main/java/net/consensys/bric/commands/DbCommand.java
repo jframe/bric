@@ -22,6 +22,7 @@ public class DbCommand implements Command {
     private final DbPutCommand putCommand;
     private final ScanCommand scanCommand;
     private final DbDropCfCommand dropCfCommand;
+    private final DbStatsCommand statsCommand;
 
     public DbCommand(BesuDatabaseManager dbManager) {
         this.dbManager = dbManager;
@@ -32,6 +33,7 @@ public class DbCommand implements Command {
         this.putCommand = new DbPutCommand(dbManager);
         this.scanCommand = new ScanCommand(dbManager);
         this.dropCfCommand = new DbDropCfCommand(dbManager);
+        this.statsCommand = new DbStatsCommand(dbManager);
     }
 
     @Override
@@ -67,6 +69,9 @@ public class DbCommand implements Command {
             case "drop-cf":
                 dropCfCommand.execute(subArgs);
                 break;
+            case "stats":
+                statsCommand.execute(subArgs);
+                break;
             default:
                 System.err.println("Error: Unknown subcommand '" + subcommand + "'");
                 System.err.println("Usage: " + getUsage());
@@ -90,6 +95,7 @@ public class DbCommand implements Command {
                "                                 db put <segment> <hex-key> <hex-value>     - Write a raw value by key (requires --write)\n" +
                "                                 db scan <segment> [--limit n] [--offset n] - Scan raw key-value entries\n" +
                "                                 db drop-cf <segment>                       - Drop a column family (requires --write)\n" +
+               "                                 db stats [cf-name]                         - Print detailed RocksDB stats\n" +
                "\n" +
                "                               Column Family Formats (<segment>):\n" +
                "                                 Predefined segment names (ACCOUNT_INFO_STATE, CODE_STORAGE, etc.)\n" +

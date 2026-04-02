@@ -9,7 +9,9 @@ import org.rocksdb.ColumnFamilyHandle;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.util.Collections;
 import java.util.Set;
+import org.rocksdb.RocksDB;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -138,5 +140,26 @@ class DbCommandTest {
     void testGetUsageContainsDropCf() {
         String usage = command.getUsage();
         assertThat(usage).contains("db drop-cf");
+    }
+
+    @Test
+    void testExecuteStatsSubcommand() {
+        when(mockDbManager.isOpen()).thenReturn(true);
+        when(mockDbManager.getMaxOpenFiles()).thenReturn(-1);
+
+        RocksDB mockRocksDb = mock(RocksDB.class);
+        when(mockDbManager.getDatabase()).thenReturn(mockRocksDb);
+        when(mockRocksDb.getLiveFilesMetaData()).thenReturn(Collections.emptyList());
+        when(mockDbManager.getColumnFamilyNames()).thenReturn(Collections.emptySet());
+
+        command.execute(new String[]{"stats"});
+
+        assertThat(errorStream.toString()).doesNotContain("Error: Unknown subcommand");
+        assertThat(outputStream.toString()).contains("DB-Level Stats");
+    }
+
+    @Test
+    void testGetUsageContainsStats() {
+        assertThat(command.getUsage()).contains("db stats");
     }
 }
