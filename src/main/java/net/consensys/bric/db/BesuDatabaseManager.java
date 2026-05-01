@@ -27,6 +27,7 @@ public class BesuDatabaseManager {
     private DatabaseFormat format;
     private boolean isOpen = false;
     private boolean writable = false;
+    private CompactionJobManager jobManager;
 
     public enum DatabaseFormat {
         BONSAI,
@@ -162,6 +163,7 @@ public class BesuDatabaseManager {
         this.writable = writable;
 
         LOG.info("Database opened successfully. Format: {}", format);
+        this.jobManager = new CompactionJobManager(db);
     }
 
     /**
@@ -171,6 +173,13 @@ public class BesuDatabaseManager {
         if (!isOpen) {
             LOG.warn("No database is currently open");
             return;
+        }
+
+        if (jobManager != null && jobManager.hasRunning()) {
+            throw new IllegalStateException(
+                "Cannot close: compaction jobs still running: "
+                + jobManager.runningJobIds()
+                + ". Cancel them first with 'db compact-cancel <job-id>'.");
         }
 
         LOG.info("Closing database at: {}", currentPath);
@@ -192,6 +201,11 @@ public class BesuDatabaseManager {
         format = null;
         isOpen = false;
         writable = false;
+
+        if (jobManager != null) {
+            jobManager.shutdownAndClear();
+            jobManager = null;
+        }
 
         LOG.info("Database closed successfully");
     }
@@ -256,6 +270,19 @@ public class BesuDatabaseManager {
             throw new IllegalStateException("No database is open");
         }
         return db;
+    }
+
+    /** Get the per-session compaction job manager. */
+    public CompactionJobManager getCompactionJobManager() {
+        if (!isOpen) {
+            throw new IllegalStateException("No database is open");
+        }
+        return jobManager;
+    }
+
+    /** Test seam: replace the job manager. Package-private. */
+    void setCompactionJobManagerForTesting(CompactionJobManager manager) {
+        this.jobManager = manager;
     }
 
     public boolean isOpen() {
