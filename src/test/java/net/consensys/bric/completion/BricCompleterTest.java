@@ -88,7 +88,7 @@ class BricCompleterTest {
         List<Candidate> candidates = new ArrayList<>();
         completer.complete(mockReader, mockParsedLine, candidates);
 
-        assertThat(candidates).hasSize(8);
+        assertThat(candidates).hasSize(11);
         assertThat(candidates).anyMatch(c -> c.value().equals("open"));
         assertThat(candidates).anyMatch(c -> c.value().equals("close"));
         assertThat(candidates).anyMatch(c -> c.value().equals("info"));
@@ -97,6 +97,9 @@ class BricCompleterTest {
         assertThat(candidates).anyMatch(c -> c.value().equals("scan"));
         assertThat(candidates).anyMatch(c -> c.value().equals("drop-cf"));
         assertThat(candidates).anyMatch(c -> c.value().equals("stats"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("compact"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("compact-status"));
+        assertThat(candidates).anyMatch(c -> c.value().equals("compact-cancel"));
     }
 
     @Test
