@@ -135,6 +135,79 @@ public class CompactionJobManager {
             .collect(Collectors.toList());
     }
 
+    private static final java.time.Duration DEFAULT_CANCEL_WAIT =
+        java.time.Duration.ofSeconds(5);
+
+    /**
+     * Signal cancellation on a single job. Returns true if the job is no
+     * longer RUNNING by the time the wait elapses (CANCELLED, DONE, or FAILED),
+     * false if the worker did not transition within the timeout.
+     */
+    public boolean cancel(int jobId) {
+        return cancel(jobId, DEFAULT_CANCEL_WAIT);
+    }
+
+    /** Test-friendly variant with a custom timeout. */
+    boolean cancel(int jobId, java.time.Duration timeout) {
+        CompactionJob job = jobs.get(jobId);
+        if (job == null) {
+            return false;
+        }
+        if (!job.isRunning()) {
+            return true;
+        }
+        try {
+            job.getOptions().setCanceled(true);
+        } catch (Exception e) {
+            LOG.warn("setCanceled failed on job {}: {}", jobId, e.toString());
+        }
+        return waitForTerminal(job, timeout);
+    }
+
+    /**
+     * Signal cancellation on every RUNNING job and wait for them to settle.
+     * Idempotent: no-op when nothing is running.
+     */
+    public void cancelAll() {
+        cancelAll(DEFAULT_CANCEL_WAIT);
+    }
+
+    void cancelAll(java.time.Duration timeout) {
+        List<CompactionJob> running = jobs.values().stream()
+            .filter(CompactionJob::isRunning)
+            .collect(Collectors.toList());
+        for (CompactionJob job : running) {
+            try {
+                job.getOptions().setCanceled(true);
+            } catch (Exception e) {
+                LOG.warn("setCanceled failed on job {}: {}",
+                    job.getId(), e.toString());
+            }
+        }
+        long deadline = System.nanoTime() + timeout.toNanos();
+        for (CompactionJob job : running) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) break;
+            waitForTerminal(job, java.time.Duration.ofNanos(remaining));
+        }
+    }
+
+    private boolean waitForTerminal(CompactionJob job, java.time.Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (job.isRunning()) {
+            if (System.nanoTime() >= deadline) {
+                return false;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return true;
+    }
+
     /**
      * Shutdown the executor and clear the job map. Called on db close.
      *

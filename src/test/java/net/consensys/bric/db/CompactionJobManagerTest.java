@@ -250,4 +250,186 @@ class CompactionJobManagerTest {
 
         Mockito.verify(opts).close();
     }
+
+    @Test
+    void cancelSetsCanceledOnJobOptionsAndReturnsTrueOnTransition() throws Exception {
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        // Worker simulates real behavior: once setCanceled(true) is called, return.
+        // Simulated by checking canceled() in a loop on the mock.
+        java.util.concurrent.atomic.AtomicBoolean cancelled =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+        Mockito.when(opts.canceled()).thenAnswer(inv -> cancelled.get());
+        Mockito.doAnswer(inv -> {
+            cancelled.set(true);
+            return opts;
+        }).when(opts).setCanceled(true);
+
+        manager = new CompactionJobManager(db, () -> opts);
+
+        // Worker spins until canceled() returns true.
+        Mockito.doAnswer(inv -> {
+            while (!cancelled.get()) {
+                Thread.sleep(20);
+            }
+            return null;
+        }).when(db).compactRange(
+            Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+            Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().isRunning());
+
+        boolean transitioned = manager.cancel(id);
+
+        assertThat(transitioned).isTrue();
+        Mockito.verify(opts).setCanceled(true);
+        assertThat(manager.get(id).orElseThrow().getState())
+            .isEqualTo(CompactionJob.State.CANCELLED);
+    }
+
+    @Test
+    void cancelReturnsFalseWhenWorkerDoesNotTransitionInTime() throws Exception {
+        // Worker is held by a latch and ignores cancellation.
+        CountDownLatch hold = new CountDownLatch(1);
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        Mockito.when(opts.canceled()).thenReturn(false);
+        manager = new CompactionJobManager(db, () -> opts);
+
+        Mockito.doAnswer(inv -> {
+            hold.await();
+            return null;
+        }).when(db).compactRange(
+            Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+            Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().isRunning());
+
+        boolean transitioned = manager.cancel(id, java.time.Duration.ofMillis(200));
+
+        assertThat(transitioned).isFalse();
+        Mockito.verify(opts).setCanceled(true);
+        // Job is still RUNNING (worker held by latch).
+        assertThat(manager.get(id).orElseThrow().isRunning()).isTrue();
+
+        hold.countDown();
+    }
+
+    @Test
+    void cancelOnlyAffectsTargetedJob() throws Exception {
+        // Two jobs, distinct options instances.
+        CompactRangeOptions opts1 = Mockito.mock(CompactRangeOptions.class);
+        CompactRangeOptions opts2 = Mockito.mock(CompactRangeOptions.class);
+        java.util.concurrent.atomic.AtomicBoolean cancelled1 =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+        Mockito.when(opts1.canceled()).thenAnswer(inv -> cancelled1.get());
+        Mockito.doAnswer(inv -> { cancelled1.set(true); return opts1; })
+            .when(opts1).setCanceled(true);
+        Mockito.when(opts2.canceled()).thenReturn(false);
+
+        java.util.Iterator<CompactRangeOptions> seq =
+            java.util.List.of(opts1, opts2).iterator();
+        manager = new CompactionJobManager(db, seq::next);
+
+        Mockito.doAnswer(inv -> {
+            CompactRangeOptions o = inv.getArgument(3);
+            while (!o.canceled()) {
+                Thread.sleep(20);
+            }
+            return null;
+        }).when(db).compactRange(
+            Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+            Mockito.any(CompactRangeOptions.class));
+
+        int id1 = manager.submit("CF1", cf);
+        int id2 = manager.submit("CF2", cf);
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id1).orElseThrow().isRunning() &&
+            manager.get(id2).orElseThrow().isRunning());
+
+        manager.cancel(id1);
+
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id1).orElseThrow().getState() == CompactionJob.State.CANCELLED);
+
+        // Job 2 must still be RUNNING — its setCanceled was never called.
+        Mockito.verify(opts2, Mockito.never()).setCanceled(Mockito.anyBoolean());
+        assertThat(manager.get(id2).orElseThrow().isRunning()).isTrue();
+    }
+
+    @Test
+    void cancelOnUnknownIdReturnsFalse() {
+        assertThat(manager.cancel(999)).isFalse();
+    }
+
+    @Test
+    void cancelOnFinishedJobReturnsTrueAndIsNoOp() throws Exception {
+        // A DONE job shouldn't have its options touched.
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        Mockito.when(opts.canceled()).thenReturn(false);
+        manager = new CompactionJobManager(db, () -> opts);
+
+        Mockito.doNothing().when(db).compactRange(
+            Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+            Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().getState() == CompactionJob.State.DONE);
+
+        boolean result = manager.cancel(id);
+
+        assertThat(result).isTrue();
+        Mockito.verify(opts, Mockito.never()).setCanceled(Mockito.anyBoolean());
+    }
+
+    @Test
+    void cancelAllSignalsEveryRunningJob() throws Exception {
+        CompactRangeOptions opts1 = Mockito.mock(CompactRangeOptions.class);
+        CompactRangeOptions opts2 = Mockito.mock(CompactRangeOptions.class);
+        java.util.concurrent.atomic.AtomicBoolean c1 =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicBoolean c2 =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+        Mockito.when(opts1.canceled()).thenAnswer(inv -> c1.get());
+        Mockito.when(opts2.canceled()).thenAnswer(inv -> c2.get());
+        Mockito.doAnswer(inv -> { c1.set(true); return opts1; })
+            .when(opts1).setCanceled(true);
+        Mockito.doAnswer(inv -> { c2.set(true); return opts2; })
+            .when(opts2).setCanceled(true);
+
+        java.util.Iterator<CompactRangeOptions> seq =
+            java.util.List.of(opts1, opts2).iterator();
+        manager = new CompactionJobManager(db, seq::next);
+
+        Mockito.doAnswer(inv -> {
+            CompactRangeOptions o = inv.getArgument(3);
+            while (!o.canceled()) Thread.sleep(20);
+            return null;
+        }).when(db).compactRange(
+            Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+            Mockito.any(CompactRangeOptions.class));
+
+        manager.submit("CF1", cf);
+        manager.submit("CF2", cf);
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.runningJobIds().size() == 2);
+
+        manager.cancelAll();
+
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.runningJobIds().isEmpty());
+
+        Mockito.verify(opts1).setCanceled(true);
+        Mockito.verify(opts2).setCanceled(true);
+    }
+
+    @Test
+    void cancelAllOnEmptyManagerIsNoOp() {
+        // Should not throw and should not block.
+        manager.cancelAll();
+        assertThat(manager.hasRunning()).isFalse();
+    }
 }
