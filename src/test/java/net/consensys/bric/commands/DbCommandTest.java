@@ -162,4 +162,38 @@ class DbCommandTest {
     void testGetUsageContainsStats() {
         assertThat(command.getUsage()).contains("db stats");
     }
+
+    @Test
+    void testExecuteCompactSubcommand() {
+        // The test just verifies routing; the command itself will print an error
+        // because the mocked db manager reports closed.
+        when(mockDbManager.isOpen()).thenReturn(false);
+
+        command.execute(new String[]{"compact", "ACCOUNT_INFO_STATE"});
+
+        // DbCompactCommand prints to stderr when the db is closed.
+        assertThat(errorStream.toString()).contains("No database is open");
+    }
+
+    @Test
+    void testExecuteCompactStatusSubcommand() {
+        when(mockDbManager.isOpen()).thenReturn(false);
+        command.execute(new String[]{"compact-status"});
+        assertThat(errorStream.toString()).contains("No database is open");
+    }
+
+    @Test
+    void testExecuteCompactCancelSubcommand() {
+        when(mockDbManager.isOpen()).thenReturn(false);
+        command.execute(new String[]{"compact-cancel", "1"});
+        assertThat(errorStream.toString()).contains("No database is open");
+    }
+
+    @Test
+    void testUsageMentionsCompactSubcommands() {
+        String usage = command.getUsage();
+        assertThat(usage).contains("db compact ");
+        assertThat(usage).contains("db compact-status");
+        assertThat(usage).contains("db compact-cancel");
+    }
 }

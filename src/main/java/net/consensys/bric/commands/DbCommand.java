@@ -23,6 +23,9 @@ public class DbCommand implements Command {
     private final ScanCommand scanCommand;
     private final DbDropCfCommand dropCfCommand;
     private final DbStatsCommand statsCommand;
+    private final DbCompactCommand compactCommand;
+    private final DbCompactStatusCommand compactStatusCommand;
+    private final DbCompactCancelCommand compactCancelCommand;
 
     public DbCommand(BesuDatabaseManager dbManager) {
         this.dbManager = dbManager;
@@ -34,6 +37,9 @@ public class DbCommand implements Command {
         this.scanCommand = new ScanCommand(dbManager);
         this.dropCfCommand = new DbDropCfCommand(dbManager);
         this.statsCommand = new DbStatsCommand(dbManager);
+        this.compactCommand = new DbCompactCommand(dbManager);
+        this.compactStatusCommand = new DbCompactStatusCommand(dbManager);
+        this.compactCancelCommand = new DbCompactCancelCommand(dbManager);
     }
 
     @Override
@@ -72,6 +78,15 @@ public class DbCommand implements Command {
             case "stats":
                 statsCommand.execute(subArgs);
                 break;
+            case "compact":
+                compactCommand.execute(subArgs);
+                break;
+            case "compact-status":
+                compactStatusCommand.execute(subArgs);
+                break;
+            case "compact-cancel":
+                compactCancelCommand.execute(subArgs);
+                break;
             default:
                 System.err.println("Error: Unknown subcommand '" + subcommand + "'");
                 System.err.println("Usage: " + getUsage());
@@ -96,6 +111,9 @@ public class DbCommand implements Command {
                "                                 db scan <segment> [--limit n] [--offset n] - Scan raw key-value entries\n" +
                "                                 db drop-cf <segment>                       - Drop a column family (requires --write)\n" +
                "                                 db stats [cf-name]                         - Print detailed RocksDB stats\n" +
+               "                                 db compact <segment...|--all>              - Submit async manual compactions (requires --write)\n" +
+               "                                 db compact-status [<job-id>]               - Show compaction job status\n" +
+               "                                 db compact-cancel <job-id>                 - Cancel a running compaction job (requires --write)\n" +
                "\n" +
                "                               Column Family Formats (<segment>):\n" +
                "                                 Predefined segment names (ACCOUNT_INFO_STATE, CODE_STORAGE, etc.)\n" +
