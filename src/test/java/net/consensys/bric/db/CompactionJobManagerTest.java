@@ -178,8 +178,9 @@ class CompactionJobManagerTest {
 
     @Test
     void workerThrowingIncompleteMarksJobCancelled() throws Exception {
+        // canceled() returns false so the Status.Incomplete path is exercised in isolation.
         CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
-        Mockito.when(opts.canceled()).thenReturn(true);
+        Mockito.when(opts.canceled()).thenReturn(false);
         manager = new CompactionJobManager(db, () -> opts);
 
         org.rocksdb.Status incomplete = new org.rocksdb.Status(

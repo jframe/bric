@@ -71,17 +71,28 @@ public class CompactionJobManager {
                 db.compactRange(handle, null, null, job.getOptions());
                 if (job.getOptions().canceled()) {
                     job.markCancelled();
+                    LOG.info("Compaction job {} for CF {} cancelled",
+                        job.getId(), job.getCfName());
                 } else {
                     job.markDone();
+                    LOG.info("Compaction job {} for CF {} done",
+                        job.getId(), job.getCfName());
                 }
             } catch (org.rocksdb.RocksDBException e) {
                 if (isCancellation(e, job.getOptions())) {
                     job.markCancelled();
+                    LOG.info("Compaction job {} for CF {} cancelled",
+                        job.getId(), job.getCfName());
                 } else {
-                    job.markFailed(e.getMessage() != null ? e.getMessage() : e.toString());
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    job.markFailed(msg);
+                    LOG.warn("Compaction job {} for CF {} failed: {}",
+                        job.getId(), job.getCfName(), msg);
                 }
             } catch (Throwable t) {
                 job.markFailed(t.toString());
+                LOG.warn("Compaction job {} for CF {} failed: {}",
+                    job.getId(), job.getCfName(), t.toString());
             }
         } finally {
             try {
@@ -95,11 +106,11 @@ public class CompactionJobManager {
 
     private static boolean isCancellation(
             org.rocksdb.RocksDBException e, CompactRangeOptions options) {
-        if (options.canceled()) {
+        org.rocksdb.Status status = e.getStatus();
+        if (status != null && status.getCode() == org.rocksdb.Status.Code.Incomplete) {
             return true;
         }
-        org.rocksdb.Status status = e.getStatus();
-        return status != null && status.getCode() == org.rocksdb.Status.Code.Incomplete;
+        return options.canceled();
     }
 
     public Optional<CompactionJob> get(int jobId) {
