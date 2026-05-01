@@ -15,7 +15,7 @@ Three new flat subcommands of `db`, mirroring the existing pattern (`db drop-cf`
 
 - `db compact <segment...|--all>` — submit one async compaction job per resolved column family. Prints the assigned job ID for each and returns immediately.
 - `db compact-status [<job-id>]` — without an argument, list every job (RUNNING / DONE / FAILED / CANCELLED) submitted in the current DB session. With a job ID, print the same row plus a per-CF detail block including RocksDB's `compaction-stats` property.
-- `db compact-cancel <job-id>` — interrupt a running job. Because RocksDB's `disableManualCompaction()` is DB-wide, cancelling one running job cancels all sibling running jobs; the command prints a warning when this happens.
+- `db compact-cancel <job-id>` — interrupt a running job. RocksDB's `CompactRangeOptions.setCanceled(true)` is per-compaction, so cancelling one job does not affect any others.
 
 `db compact` and `db compact-cancel` require the database to be open in `--write` mode (compaction mutates SST files). `db compact-status` works in any mode — it reads in-memory job state and a RocksDB property, neither of which requires write access. In read-only mode the job list will simply be empty.
 
@@ -55,6 +55,7 @@ Fields:
 - `startedAt` (Instant)
 - `finishedAt` (Instant, nullable)
 - `error` (String, nullable — populated when state is FAILED)
+- `options` (`CompactRangeOptions`) — per-job options object passed to `compactRange`; `setCanceled(true)` on this is how cancellation is signalled. Closed (`options.close()`) by the worker after `compactRange` returns, regardless of outcome (the native handle would otherwise leak).
 
 State transitions are guarded by `synchronized` on the job instance. The state field is the single source of truth for what happened to a job.
 
@@ -69,18 +70,24 @@ Internals:
 - A reference to the open `RocksDB` (passed at construction).
 
 Methods:
-- `int submit(String cfName, ColumnFamilyHandle handle)` — allocate ID, create RUNNING job, submit a `Runnable` that calls `db.compactRange(handle)` and updates state on completion. Returns the job ID.
-- `void cancel(int jobId)` — calls `db.disableManualCompaction()` (DB-wide), waits up to 5s for the worker to flip to CANCELLED, then calls `db.enableManualCompaction()`. If the worker hasn't transitioned within the timeout, still re-enables (we don't want manual compaction permanently disabled). **Side effect:** because `disableManualCompaction()` is DB-wide, every other RUNNING job is also cancelled. Callers handle the warning (see `DbCompactCancelCommand`).
-- `void cancelAll()` — same mechanism (`disableManualCompaction()` once, wait for all RUNNING jobs to flip, `enableManualCompaction()`). Used by REPL exit. Idempotent: safe to call when no jobs are running.
+- `int submit(String cfName, ColumnFamilyHandle handle)` — allocate ID, construct a fresh `CompactRangeOptions`, create a RUNNING job holding both, submit a `Runnable` that calls `db.compactRange(handle, null, null, options)` and updates state on completion. Returns the job ID.
+- `void cancel(int jobId)` — calls `setCanceled(true)` on the job's `CompactRangeOptions`. RocksDB's compaction loop polls this flag and aborts. The method waits up to 5s for the worker to flip the job to CANCELLED, then returns regardless. **No effect on sibling jobs** — cancellation is per-compaction.
+- `void cancelAll()` — calls `setCanceled(true)` on every RUNNING job's options, waits up to 5s for all of them to flip. Used by REPL exit. Idempotent: safe to call when no jobs are running.
 - `Optional<CompactionJob> get(int jobId)`.
 - `List<CompactionJob> list()` — sorted by ID.
 - `boolean hasRunning()`, `List<Integer> runningJobIds()`.
 - `void shutdownAndClear()` — called by `closeDatabase()` on a clean close (no running jobs); shuts down the executor and clears the map.
 
-Worker `Runnable` exception handling:
-- `RocksDBException` with `Status.Code.Incomplete` → mark CANCELLED.
-- Any other `RocksDBException` → mark FAILED, store `e.getMessage()`.
-- Any other `Throwable` → mark FAILED, store `e.toString()`. Never let an exception escape the worker.
+Worker `Runnable` body and exception handling:
+- Try: `db.compactRange(handle, null, null, job.options)`.
+- After the call returns or throws, in a `finally` block: close `job.options` (releases the native handle).
+- Outcome mapping:
+  - Returns normally **and** `job.options.canceled() == true` → mark CANCELLED. (Some RocksDB builds return cleanly rather than throwing on cancel; we check the flag explicitly.)
+  - Returns normally → mark DONE.
+  - `RocksDBException` with `Status.Code.Incomplete` **or** the options' canceled flag is set → mark CANCELLED.
+  - Any other `RocksDBException` → mark FAILED, store `e.getMessage()`.
+  - Any other `Throwable` → mark FAILED, store `e.toString()`. Never let an exception escape the worker.
+- In all cases, set `finishedAt = Instant.now()`.
 
 #### `commands/DbCompactCommand`
 
@@ -107,8 +114,7 @@ Errors: `Error: No such job: <id>` if the ID isn't in the manager.
 
 1. Guard: DB open + writable; job ID is numeric.
 2. Look up job. If not RUNNING, `Error: Job <id> is already <state>` and return.
-3. If `runningJobIds().size() > 1`, print to stderr: `Warning: cancelling job <id> will also cancel sibling running jobs: [<ids>]. Proceeding.`
-4. Call `jobManager.cancel(jobId)`. Print `Cancelled job <id>`.
+3. Call `jobManager.cancel(jobId)`. Print `Cancelled job <id>` (or `Cancel signalled for job <id> (worker did not transition within timeout)` if the wait timed out).
 
 ### Wiring
 
@@ -146,10 +152,10 @@ Add `compact`, `compact-status`, `compact-cancel` to the `db` subcommand autocom
 ### Cancellation
 
 1. User types `db compact-cancel 1`.
-2. Command verifies job 1 is RUNNING. If sibling RUNNING jobs exist, prints the warning.
-3. Manager calls `db.disableManualCompaction()`. RocksDB raises `Status.Incomplete` from the worker's `compactRange`.
-4. Worker catches, transitions job to CANCELLED.
-5. Manager polls the job's state for up to 5s; once CANCELLED (or timeout), calls `db.enableManualCompaction()`.
+2. Command verifies job 1 is RUNNING.
+3. Manager calls `setCanceled(true)` on job 1's `CompactRangeOptions`.
+4. RocksDB's compaction loop polls the flag and aborts. The worker either gets `RocksDBException(Status.Incomplete)` or returns normally with `options.canceled() == true`. Either way the worker transitions the job to CANCELLED.
+5. Manager polls the job's state for up to 5s; returns once CANCELLED (or timeout — sibling jobs are unaffected, so a stuck cancel is recoverable).
 6. Command prints `Cancelled job 1`.
 
 ### Close while running
@@ -178,7 +184,7 @@ All exceptions are caught inside the `Runnable` and recorded on the job. Nothing
 
 ### Cancel timeout
 
-If the worker doesn't transition to CANCELLED within 5s of `disableManualCompaction()`, the manager still calls `enableManualCompaction()` and returns. The job will eventually transition (whenever the worker actually returns from `compactRange`); meanwhile, future jobs aren't blocked.
+If the worker doesn't transition to CANCELLED within 5s of `setCanceled(true)`, the manager returns anyway and the command reports the timeout (without claiming success). The cancellation flag is still set on the job's options, so the worker will eventually transition when its compaction loop next polls — sibling jobs are untouched, and future jobs are unaffected. There is no DB-wide state to clean up.
 
 ## Testing
 
@@ -213,10 +219,10 @@ JUnit 5 + AssertJ + Mockito; `BesuDatabaseManager` and `RocksDB` are mocked (mat
 
 ### `DbCompactCancelCommandTest`
 
-- Cancels a single RUNNING job (verify `disableManualCompaction` then `enableManualCompaction` calls in order).
-- Multi-job warning printed when sibling RUNNING jobs exist.
-- Errors on already-finished job.
-- `enableManualCompaction` is still called when the worker doesn't transition within the timeout.
+- Cancels a single RUNNING job (verify `setCanceled(true)` is called on that job's options).
+- Errors on already-finished job (DONE / FAILED / CANCELLED).
+- Reports timeout when the worker doesn't transition within the wait window (worker held by a latch in the test).
+- Cancelling job N does not call `setCanceled` on job M's options (sibling-isolation regression test).
 
 ### `DbCommandTest` (existing)
 
@@ -237,7 +243,7 @@ Extended with three cases routing to the new subcommands.
 
 **Why `compact-status` doesn't require write mode.** Status only reads in-memory job state and a read-only RocksDB property. The job map will be empty in a read-only session (since you couldn't have submitted anything), so the command is a no-op there — but a no-op is more user-friendly than a refusal, and there's no safety reason to gate it behind write mode.
 
-**Why DB-wide cancel semantics with a warning rather than per-job cancel.** RocksDB's `disableManualCompaction()` is DB-wide; there is no API to cancel a specific manual compaction. Implementing per-job cancel would require either re-issuing the surviving compactions (complex, error-prone) or refusing cancel when more than one job runs (frustrating). A warning when sibling jobs exist makes the behavior explicit and rarely matters in practice — multi-CF concurrent manual compaction is uncommon.
+**Why per-job cancel (via `CompactRangeOptions.setCanceled`).** rocksdbjni 10.6.2 doesn't expose `disableManualCompaction()` / `enableManualCompaction()` (DB-wide on/off switches that exist in the C++ API). It does expose `CompactRangeOptions.setCanceled(boolean)`, which signals the specific compaction associated with that options object. Each job constructs its own options, so cancellation is naturally isolated per-job — no warning is needed for sibling jobs.
 
 **Why no persistence and no CLI batch mode.** Persisting jobs to disk would let a new bric instance see historical jobs but couldn't actually resume them (RocksDB doesn't support that), and only one bric process can hold the write lock anyway. CLI batch mode would help wrap with `nohup` for very long jobs, but `tmux`/`screen` already solves session-drop survival without adding code. Both can be added later if needed.
 
