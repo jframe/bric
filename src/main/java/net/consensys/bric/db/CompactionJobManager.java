@@ -47,8 +47,13 @@ public class CompactionJobManager {
     }
 
     /**
-     * Submit a manual compaction for {@code handle}. Returns immediately;
-     * the worker runs on the executor.
+     * Submit a manual compaction for {@code handle}. Returns immediately; the
+     * worker runs on the executor.
+     *
+     * <p>The job is registered in {@link CompactionJob.State#RUNNING} state
+     * before the worker thread has actually started executing. Callers that
+     * need to observe state transitions should poll {@link #get(int)} rather
+     * than assuming the worker is mid-flight.
      */
     public int submit(String cfName, ColumnFamilyHandle handle) {
         int id = nextId.getAndIncrement();
@@ -92,7 +97,15 @@ public class CompactionJobManager {
             .collect(Collectors.toList());
     }
 
-    /** Shutdown the executor and clear the job map. Called on db close. */
+    /**
+     * Shutdown the executor and clear the job map. Called on db close.
+     *
+     * <p>Caller precondition: there must be no RUNNING jobs. {@code
+     * BesuDatabaseManager.closeDatabase()} enforces this by checking
+     * {@link #hasRunning()} before invoking this method. Calling this while
+     * workers are still inside {@code compactRange} can leave them updating
+     * job objects that are no longer reachable through the map.
+     */
     public void shutdownAndClear() {
         executor.shutdownNow();
         jobs.clear();
