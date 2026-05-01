@@ -38,23 +38,24 @@ public class CompactionJob {
 
     public synchronized void markDone() {
         requireRunning();
-        this.state = State.DONE;
         this.finishedAt = Instant.now();
+        this.state = State.DONE;
     }
 
     public synchronized void markFailed(String message) {
         requireRunning();
-        this.state = State.FAILED;
         this.error = message;
         this.finishedAt = Instant.now();
+        this.state = State.FAILED;
     }
 
     public synchronized void markCancelled() {
         requireRunning();
-        this.state = State.CANCELLED;
         this.finishedAt = Instant.now();
+        this.state = State.CANCELLED;
     }
 
+    /** Unsynchronized read; use only as a pre-check before mark* calls. */
     public boolean isRunning() {
         return state == State.RUNNING;
     }

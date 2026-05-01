@@ -64,13 +64,39 @@ class CompactionJobTest {
     }
 
     @Test
-    void terminalStateCannotBeChanged() {
+    void terminalDoneCannotBeChanged() {
         CompactionJob job = new CompactionJob(1, "CF", mockOptions());
         job.markDone();
 
         assertThatThrownBy(job::markDone)
             .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> job.markFailed("x"))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(job::markCancelled)
+            .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void terminalFailedCannotBeChanged() {
+        CompactionJob job = new CompactionJob(2, "CF", mockOptions());
+        job.markFailed("boom");
+
+        assertThatThrownBy(job::markDone)
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> job.markFailed("y"))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(job::markCancelled)
+            .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void terminalCancelledCannotBeChanged() {
+        CompactionJob job = new CompactionJob(3, "CF", mockOptions());
+        job.markCancelled();
+
+        assertThatThrownBy(job::markDone)
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> job.markFailed("z"))
             .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(job::markCancelled)
             .isInstanceOf(IllegalStateException.class);
