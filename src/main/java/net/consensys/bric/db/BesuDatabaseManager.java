@@ -167,21 +167,36 @@ public class BesuDatabaseManager {
     }
 
     /**
-     * Close the currently open database.
+     * Close the currently open database. Refuses if any compaction jobs
+     * are still RUNNING — call {@code db compact-cancel <id>} first.
      */
     public synchronized void closeDatabase() {
         if (!isOpen) {
             LOG.warn("No database is currently open");
             return;
         }
-
         if (jobManager != null && jobManager.hasRunning()) {
             throw new IllegalStateException(
                 "Cannot close: compaction jobs still running: "
                 + jobManager.runningJobIds()
                 + ". Cancel them first with 'db compact-cancel <job-id>'.");
         }
+        doClose();
+    }
 
+    /**
+     * Force-close the database, bypassing the running-jobs guard. Intended
+     * for the JVM shutdown hook only — interactive {@code db close} should
+     * use {@link #closeDatabase()} instead.
+     */
+    public synchronized void closeDatabaseForce() {
+        if (!isOpen) {
+            return;
+        }
+        doClose();
+    }
+
+    private void doClose() {
         LOG.info("Closing database at: {}", currentPath);
 
         // Close column family handles

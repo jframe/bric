@@ -36,10 +36,7 @@ class BesuDatabaseManagerCompactionTest {
     @AfterEach
     void tearDown() throws Exception {
         if (manager.isOpen()) {
-            // Replace any stub job manager with a real one so close succeeds.
-            manager.setCompactionJobManagerForTesting(
-                new CompactionJobManager(manager.getDatabase()));
-            manager.closeDatabase();
+            manager.closeDatabaseForce();
         }
         deleteRecursively(tempDbDir);
     }
@@ -72,6 +69,21 @@ class BesuDatabaseManagerCompactionTest {
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("compaction jobs still running")
             .hasMessageContaining("[3, 5]");
+    }
+
+    @Test
+    void closeDatabaseForceSucceedsEvenWhenJobsRunning() {
+        CompactionJobManager stub = new CompactionJobManager(manager.getDatabase()) {
+            @Override
+            public boolean hasRunning() { return true; }
+            @Override
+            public List<Integer> runningJobIds() { return List.of(1); }
+        };
+        manager.setCompactionJobManagerForTesting(stub);
+
+        manager.closeDatabaseForce();
+
+        assertThat(manager.isOpen()).isFalse();
     }
 
     private static void deleteRecursively(Path dir) throws Exception {

@@ -75,7 +75,10 @@ public class BricApplication implements Callable<Integer> {
                         LOG.info("Cancelling running compaction jobs...");
                         processor.getDbManager().getCompactionJobManager().cancelAll();
                     }
-                    processor.getDbManager().closeDatabase();
+                    // Force close: even if cancelAll timed out and a worker is
+                    // still RUNNING, we're tearing down the JVM and want native
+                    // handles released cleanly.
+                    processor.getDbManager().closeDatabaseForce();
                 }
             } catch (Exception e) {
                 LOG.error("Error closing database on shutdown", e);

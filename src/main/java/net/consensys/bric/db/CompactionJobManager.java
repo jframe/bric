@@ -158,8 +158,8 @@ public class CompactionJobManager {
         }
         try {
             job.getOptions().setCanceled(true);
-        } catch (Exception e) {
-            LOG.warn("setCanceled failed on job {}: {}", jobId, e.toString());
+        } catch (Throwable t) {
+            LOG.warn("setCanceled failed on job {}: {}", jobId, t.toString());
         }
         return waitForTerminal(job, timeout);
     }
@@ -179,9 +179,9 @@ public class CompactionJobManager {
         for (CompactionJob job : running) {
             try {
                 job.getOptions().setCanceled(true);
-            } catch (Exception e) {
+            } catch (Throwable t) {
                 LOG.warn("setCanceled failed on job {}: {}",
-                    job.getId(), e.toString());
+                    job.getId(), t.toString());
             }
         }
         long deadline = System.nanoTime() + timeout.toNanos();
