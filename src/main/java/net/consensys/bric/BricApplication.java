@@ -71,6 +71,10 @@ public class BricApplication implements Callable<Integer> {
             try {
                 if (processor.getDbManager().isOpen()) {
                     LOG.info("Closing database on shutdown...");
+                    if (processor.getDbManager().getCompactionJobManager().hasRunning()) {
+                        LOG.info("Cancelling running compaction jobs...");
+                        processor.getDbManager().getCompactionJobManager().cancelAll();
+                    }
                     processor.getDbManager().closeDatabase();
                 }
             } catch (Exception e) {
