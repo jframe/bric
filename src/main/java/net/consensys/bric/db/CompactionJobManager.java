@@ -66,13 +66,40 @@ public class CompactionJobManager {
     }
 
     private void runWorker(CompactionJob job, ColumnFamilyHandle handle) {
-        // Outcome handling lands in Task 3. For now, just call compactRange and
-        // let any exception escape (caught by ExecutorService).
         try {
-            db.compactRange(handle, null, null, job.getOptions());
-        } catch (Exception e) {
-            LOG.warn("Compaction job {} threw: {}", job.getId(), e.toString());
+            try {
+                db.compactRange(handle, null, null, job.getOptions());
+                if (job.getOptions().canceled()) {
+                    job.markCancelled();
+                } else {
+                    job.markDone();
+                }
+            } catch (org.rocksdb.RocksDBException e) {
+                if (isCancellation(e, job.getOptions())) {
+                    job.markCancelled();
+                } else {
+                    job.markFailed(e.getMessage() != null ? e.getMessage() : e.toString());
+                }
+            } catch (Throwable t) {
+                job.markFailed(t.toString());
+            }
+        } finally {
+            try {
+                job.getOptions().close();
+            } catch (Exception e) {
+                LOG.warn("Failed to close CompactRangeOptions for job {}: {}",
+                    job.getId(), e.toString());
+            }
         }
+    }
+
+    private static boolean isCancellation(
+            org.rocksdb.RocksDBException e, CompactRangeOptions options) {
+        if (options.canceled()) {
+            return true;
+        }
+        org.rocksdb.Status status = e.getStatus();
+        return status != null && status.getCode() == org.rocksdb.Status.Code.Incomplete;
     }
 
     public Optional<CompactionJob> get(int jobId) {

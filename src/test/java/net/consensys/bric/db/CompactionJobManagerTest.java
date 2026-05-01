@@ -134,4 +134,119 @@ class CompactionJobManagerTest {
         assertThat(manager.hasRunning()).isFalse();
         assertThat(manager.runningJobIds()).isEmpty();
     }
+
+    @Test
+    void workerCompletingCleanlyMarksJobDone() throws Exception {
+        // compactRange returns normally, options.canceled() returns false.
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        Mockito.when(opts.canceled()).thenReturn(false);
+        manager = new CompactionJobManager(db, () -> opts);
+
+        Mockito.doNothing().when(db).compactRange(
+            Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+            Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().getState() == CompactionJob.State.DONE);
+
+        CompactionJob job = manager.get(id).orElseThrow();
+        assertThat(job.getFinishedAt()).isNotNull();
+        assertThat(job.getError()).isNull();
+    }
+
+    @Test
+    void workerThrowingRocksDBExceptionMarksJobFailed() throws Exception {
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        Mockito.when(opts.canceled()).thenReturn(false);
+        manager = new CompactionJobManager(db, () -> opts);
+
+        Mockito.doThrow(new org.rocksdb.RocksDBException("io error"))
+            .when(db).compactRange(
+                Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+                Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().getState() == CompactionJob.State.FAILED);
+
+        CompactionJob job = manager.get(id).orElseThrow();
+        assertThat(job.getError()).contains("io error");
+    }
+
+    @Test
+    void workerThrowingIncompleteMarksJobCancelled() throws Exception {
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        Mockito.when(opts.canceled()).thenReturn(true);
+        manager = new CompactionJobManager(db, () -> opts);
+
+        org.rocksdb.Status incomplete = new org.rocksdb.Status(
+            org.rocksdb.Status.Code.Incomplete, org.rocksdb.Status.SubCode.None, "");
+        Mockito.doThrow(new org.rocksdb.RocksDBException("manual compaction paused", incomplete))
+            .when(db).compactRange(
+                Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+                Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().getState() == CompactionJob.State.CANCELLED);
+    }
+
+    @Test
+    void workerReturningNormallyWithCanceledFlagMarksCancelled() throws Exception {
+        // RocksDB sometimes returns cleanly when cancellation is observed —
+        // we still want to record that as CANCELLED, not DONE.
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        Mockito.when(opts.canceled()).thenReturn(true);
+        manager = new CompactionJobManager(db, () -> opts);
+
+        Mockito.doNothing().when(db).compactRange(
+            Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+            Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().getState() == CompactionJob.State.CANCELLED);
+    }
+
+    @Test
+    void workerThrowingUnexpectedThrowableMarksFailed() throws Exception {
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        Mockito.when(opts.canceled()).thenReturn(false);
+        manager = new CompactionJobManager(db, () -> opts);
+
+        Mockito.doThrow(new RuntimeException("boom"))
+            .when(db).compactRange(
+                Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+                Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().getState() == CompactionJob.State.FAILED);
+
+        assertThat(manager.get(id).orElseThrow().getError()).contains("boom");
+    }
+
+    @Test
+    void workerClosesOptionsOnCompletion() throws Exception {
+        CompactRangeOptions opts = Mockito.mock(CompactRangeOptions.class);
+        Mockito.when(opts.canceled()).thenReturn(false);
+        manager = new CompactionJobManager(db, () -> opts);
+
+        Mockito.doNothing().when(db).compactRange(
+            Mockito.any(), Mockito.isNull(), Mockito.isNull(),
+            Mockito.any(CompactRangeOptions.class));
+
+        int id = manager.submit("CF", cf);
+
+        await().atMost(2, TimeUnit.SECONDS).until(() ->
+            manager.get(id).orElseThrow().getState() == CompactionJob.State.DONE);
+
+        Mockito.verify(opts).close();
+    }
 }
