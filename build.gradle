@@ -11,8 +11,8 @@ group = 'net.consensys.bric'
 version = '1.0.0-SNAPSHOT'
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
 }
 
 repositories {
@@ -26,6 +26,10 @@ dependencyManagement {
         mavenBom 'org.hyperledger.besu:bom:25.12.0'
         // Override Besu's log4j version with newer version that includes BridgeAware
         mavenBom 'org.apache.logging.log4j:log4j-bom:2.25.2'
+    }
+    dependencies {
+        // Override Besu BOM's Mockito 5.7.0 — too old to instrument Java 25 bytecode
+        dependency 'org.mockito:mockito-core:5.18.0'
     }
 }
 
@@ -67,6 +71,7 @@ dependencies {
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testImplementation 'org.assertj:assertj-core'
     testImplementation 'org.mockito:mockito-core'
     testImplementation 'org.awaitility:awaitility:4.2.2'
