@@ -35,6 +35,9 @@ public class BricApplication implements Callable<Integer> {
     @Option(names = {"-d", "--database"}, description = "Database path to open on startup")
     private String databasePath;
 
+    @Option(names = {"--write"}, description = "Open database in write mode (default: read-only)")
+    private boolean writeMode;
+
     @Parameters(index = "0..*", description = "Command to execute (non-interactive mode)", hidden = true)
     private List<String> commandArgs;
 
@@ -55,11 +58,14 @@ public class BricApplication implements Callable<Integer> {
                 databasePath = System.getProperty("user.home") + databasePath.substring(1);
             }
             try {
-                processor.getDbManager().openDatabase(databasePath);
+                processor.getDbManager().openDatabase(databasePath, writeMode);
                 if (!nonInteractive) {
                     System.out.println("Successfully opened database at: " + databasePath);
                     System.out.println("Database format: " + processor.getDbManager().getFormat());
                     System.out.println("Column families: " + processor.getDbManager().getColumnFamilyNames().size());
+                    if (writeMode) {
+                        System.out.println("Warning: database opened in write mode");
+                    }
                     System.out.println();
                 }
             } catch (Exception e) {
