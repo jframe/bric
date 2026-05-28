@@ -10,10 +10,12 @@ import org.jline.terminal.TerminalBuilder;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.Callable;
 
 @Command(
@@ -33,6 +35,9 @@ public class BricApplication implements Callable<Integer> {
     @Option(names = {"-d", "--database"}, description = "Database path to open on startup")
     private String databasePath;
 
+    @Parameters(index = "0..*", description = "Command to execute (non-interactive mode)", hidden = true)
+    private List<String> commandArgs;
+
     public static void main(String[] args) {
         int exitCode = new CommandLine(new BricApplication()).execute(args);
         System.exit(exitCode);
@@ -40,26 +45,30 @@ public class BricApplication implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        printWelcomeBanner();
+        boolean nonInteractive = commandArgs != null && !commandArgs.isEmpty();
 
         BricCommandProcessor processor = new BricCommandProcessor(verbose);
 
         // Auto-open database if path provided
         if (databasePath != null && !databasePath.trim().isEmpty()) {
-            // Expand tilde to user home directory
             if (databasePath.startsWith("~")) {
                 databasePath = System.getProperty("user.home") + databasePath.substring(1);
             }
             try {
                 processor.getDbManager().openDatabase(databasePath);
-                System.out.println("Successfully opened database at: " + databasePath);
-                System.out.println("Database format: " + processor.getDbManager().getFormat());
-                System.out.println("Column families: " + processor.getDbManager().getColumnFamilyNames().size());
-                System.out.println();
+                if (!nonInteractive) {
+                    System.out.println("Successfully opened database at: " + databasePath);
+                    System.out.println("Database format: " + processor.getDbManager().getFormat());
+                    System.out.println("Column families: " + processor.getDbManager().getColumnFamilyNames().size());
+                    System.out.println();
+                }
             } catch (Exception e) {
                 System.err.println("Error opening database: " + e.getMessage());
                 if (verbose) {
                     LOG.error("Failed to open database", e);
+                }
+                if (nonInteractive) {
+                    return 1;
                 }
                 System.err.println("Continuing without database. Use 'db open <path>' to open a database.");
                 System.out.println();
@@ -85,11 +94,17 @@ public class BricApplication implements Callable<Integer> {
             }
         }));
 
+        if (nonInteractive) {
+            processor.processCommand(String.join(" ", commandArgs));
+            return 0;
+        }
+
+        printWelcomeBanner();
+
         try (Terminal terminal = TerminalBuilder.builder()
                 .system(true)
                 .build()) {
 
-            // Create and register completer for command autocomplete
             BricCompleter completer = new BricCompleter(processor);
 
             LineReader reader = LineReaderBuilder.builder()
