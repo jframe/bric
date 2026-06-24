@@ -61,6 +61,8 @@ class DbInfoCommandTest {
 
         when(mockDbManager.getStats("cf1")).thenReturn(stats1);
         when(mockDbManager.getStats("cf2")).thenReturn(stats2);
+        when(mockDbManager.getColumnFamilyId("cf1")).thenReturn(new byte[]{6});
+        when(mockDbManager.getColumnFamilyId("cf2")).thenReturn(new byte[]{10});
 
         command.execute(new String[]{});
 
@@ -72,6 +74,31 @@ class DbInfoCommandTest {
         assertThat(output).contains("cf1");
         assertThat(output).contains("cf2");
         assertThat(output).contains("TOTAL");
+        // Hex id is shown in brackets after the column family name
+        assertThat(output).contains("cf1 [0x06]");
+        assertThat(output).contains("cf2 [0x0a]");
+    }
+
+    @Test
+    void testExecuteWithoutColumnFamilyId() throws Exception {
+        when(mockDbManager.isOpen()).thenReturn(true);
+        when(mockDbManager.getCurrentPath()).thenReturn("/path/to/db");
+        when(mockDbManager.getFormat()).thenReturn(DatabaseFormat.BONSAI);
+        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("cf1"));
+
+        DatabaseStats stats1 = new DatabaseStats();
+        stats1.estimatedKeys = 1000;
+        stats1.totalSstSize = 1024 * 1024;
+        stats1.totalBlobSize = 0;
+
+        when(mockDbManager.getStats("cf1")).thenReturn(stats1);
+        when(mockDbManager.getColumnFamilyId("cf1")).thenReturn(null);
+
+        command.execute(new String[]{});
+
+        String output = outputStream.toString();
+        assertThat(output).contains("cf1");
+        assertThat(output).doesNotContain("cf1 [");
     }
 
     @Test

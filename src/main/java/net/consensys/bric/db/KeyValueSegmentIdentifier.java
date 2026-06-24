@@ -66,6 +66,17 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
     }
 
     /**
+     * Convert column family id bytes to a hex string (e.g. {@code 0x06}).
+     */
+    public static String toHexId(byte[] id) {
+        StringBuilder sb = new StringBuilder("0x");
+        for (byte b : id) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    /**
      * Convert byte array to readable string
      */
     public static String idToString(byte[] id) {

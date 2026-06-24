@@ -3,6 +3,7 @@ package net.consensys.bric.commands;
 import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.BesuDatabaseManager.DatabaseStats;
 import net.consensys.bric.db.BesuDatabaseReader;
+import net.consensys.bric.db.KeyValueSegmentIdentifier;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,10 +48,10 @@ public class DbInfoCommand implements Command {
         System.out.println();
 
         System.out.println("Column Family Statistics:");
-        System.out.println("─".repeat(100));
-        System.out.printf("%-35s %15s %15s %15s %15s%n",
+        System.out.println("─".repeat(110));
+        System.out.printf("%-45s %15s %15s %15s %15s%n",
             "Column Family", "Keys (est)", "SST Size", "Blob Size", "Total Size");
-        System.out.println("─".repeat(100));
+        System.out.println("─".repeat(110));
 
         List<DatabaseStats> allStats = new ArrayList<>();
         long totalKeys = 0;
@@ -78,8 +79,8 @@ public class DbInfoCommand implements Command {
                     : "N/A";
                 String totalStr = formatBytes(stats.getTotalSize());
 
-                System.out.printf("%-35s %15s %15s %15s %15s%n",
-                    truncate(cfName, 35), keysStr, sstStr, blobStr, totalStr);
+                System.out.printf("%-45s %15s %15s %15s %15s%n",
+                    truncate(columnFamilyLabel(cfName), 45), keysStr, sstStr, blobStr, totalStr);
 
                 if (stats.estimatedKeys >= 0) {
                     totalKeys += stats.estimatedKeys;
@@ -87,14 +88,28 @@ public class DbInfoCommand implements Command {
                 totalSize += stats.getTotalSize();
 
             } catch (Exception e) {
-                System.out.printf("%-35s %15s%n", truncate(cfName, 35), "Error: " + e.getMessage());
+                System.out.printf("%-45s %15s%n",
+                    truncate(columnFamilyLabel(cfName), 45), "Error: " + e.getMessage());
             }
         }
 
-        System.out.println("─".repeat(100));
-        System.out.printf("%-35s %15s %15s%n",
+        System.out.println("─".repeat(110));
+        System.out.printf("%-45s %15s %15s%n",
             "TOTAL", formatNumber(totalKeys), formatBytes(totalSize));
         System.out.println();
+    }
+
+    /**
+     * Build the column family display label, appending the hex id in brackets
+     * (e.g. {@code ACCOUNT_INFO_STATE [0x06]}) so the family can still be
+     * referenced by id even when shown under its friendly name.
+     */
+    private String columnFamilyLabel(String cfName) {
+        byte[] id = dbManager.getColumnFamilyId(cfName);
+        if (id == null) {
+            return cfName;
+        }
+        return cfName + " [" + KeyValueSegmentIdentifier.toHexId(id) + "]";
     }
 
     private String formatBytes(long bytes) {

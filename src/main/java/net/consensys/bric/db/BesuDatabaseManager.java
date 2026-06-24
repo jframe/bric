@@ -24,6 +24,7 @@ public class BesuDatabaseManager {
     private String currentPath;
     private final List<ColumnFamilyHandle> columnFamilyHandles = new ArrayList<>();
     private final Map<String, ColumnFamilyHandle> handlesByName = new HashMap<>();
+    private final Map<String, byte[]> rawIdByName = new HashMap<>();
     private DatabaseFormat format;
     private boolean isOpen = false;
     private boolean writable = false;
@@ -152,8 +153,10 @@ public class BesuDatabaseManager {
 
         // Map column family handles by name
         for (int i = 0; i < cfDescriptors.size(); i++) {
-            String name = KeyValueSegmentIdentifier.idToString(cfDescriptors.get(i).getName());
+            byte[] rawId = cfDescriptors.get(i).getName();
+            String name = KeyValueSegmentIdentifier.idToString(rawId);
             handlesByName.put(name, columnFamilyHandles.get(i));
+            rawIdByName.put(name, rawId);
             LOG.debug("Mapped column family: {}", name);
         }
 
@@ -205,6 +208,7 @@ public class BesuDatabaseManager {
         }
         columnFamilyHandles.clear();
         handlesByName.clear();
+        rawIdByName.clear();
 
         // Close database
         if (db != null) {
@@ -265,6 +269,19 @@ public class BesuDatabaseManager {
         }
 
         return null;
+    }
+
+    /**
+     * Get the raw column family id bytes for a stored column family name.
+     *
+     * @param cfName the stored column family name (as returned by getColumnFamilyNames())
+     * @return the raw id bytes, or null if the name is unknown
+     */
+    public byte[] getColumnFamilyId(String cfName) {
+        if (!isOpen) {
+            throw new IllegalStateException("No database is open");
+        }
+        return rawIdByName.get(cfName);
     }
 
     /**
@@ -346,6 +363,7 @@ public class BesuDatabaseManager {
         LOG.info("Dropping column family: {}", cfName);
         db.dropColumnFamily(handle);
         handlesByName.remove(cfName);
+        rawIdByName.remove(cfName);
         columnFamilyHandles.remove(handle);
         handle.close();
     }
