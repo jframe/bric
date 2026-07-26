@@ -3,6 +3,7 @@ package net.consensys.bric.besu;
 import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.KeyValueSegmentIdentifier;
 import org.apache.commons.lang3.tuple.Pair;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -162,6 +163,37 @@ class RocksDBSegmentedStorageTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).getLeft()).isEqualTo(new byte[]{0x05});
         assertThat(results.get(0).getRight()).isEqualTo("b".getBytes());
+    }
+
+    @Test
+    void transaction_put_throwsStorageExceptionForUnknownSegment() throws Exception {
+        createTestDatabase();
+        dbManager.openDatabase(tempDir.toString(), true);
+        storage = new RocksDBSegmentedStorage(dbManager);
+
+        SegmentedKeyValueStorageTransaction transaction = storage.startTransaction();
+
+        assertThatThrownBy(() -> transaction.put(
+                KeyValueSegmentIdentifier.CODE_STORAGE, "key".getBytes(), "value".getBytes()))
+            .isInstanceOf(StorageException.class)
+            .hasMessageContaining("CODE_STORAGE");
+
+        transaction.close();
+    }
+
+    @Test
+    void transaction_remove_throwsStorageExceptionForUnknownSegment() throws Exception {
+        createTestDatabase();
+        dbManager.openDatabase(tempDir.toString(), true);
+        storage = new RocksDBSegmentedStorage(dbManager);
+
+        SegmentedKeyValueStorageTransaction transaction = storage.startTransaction();
+
+        assertThatThrownBy(() -> transaction.remove(KeyValueSegmentIdentifier.CODE_STORAGE, "key".getBytes()))
+            .isInstanceOf(StorageException.class)
+            .hasMessageContaining("CODE_STORAGE");
+
+        transaction.close();
     }
 
     @Test

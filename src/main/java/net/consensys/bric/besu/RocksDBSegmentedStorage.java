@@ -213,8 +213,12 @@ public class RocksDBSegmentedStorage implements SegmentedKeyValueStorage {
 
         @Override
         public void put(SegmentIdentifier segment, byte[] key, byte[] value) {
+            ColumnFamilyHandle cfHandle = getColumnFamilyHandle(segment);
+            if (cfHandle == null) {
+                throw new StorageException("Unknown segment: " + segment.getName());
+            }
             try {
-                batch.put(getColumnFamilyHandle(segment), key, value);
+                batch.put(cfHandle, key, value);
             } catch (RocksDBException e) {
                 throw new StorageException("Failed to stage put", e);
             }
@@ -222,8 +226,12 @@ public class RocksDBSegmentedStorage implements SegmentedKeyValueStorage {
 
         @Override
         public void remove(SegmentIdentifier segment, byte[] key) {
+            ColumnFamilyHandle cfHandle = getColumnFamilyHandle(segment);
+            if (cfHandle == null) {
+                throw new StorageException("Unknown segment: " + segment.getName());
+            }
             try {
-                batch.delete(getColumnFamilyHandle(segment), key);
+                batch.delete(cfHandle, key);
             } catch (RocksDBException e) {
                 throw new StorageException("Failed to stage remove", e);
             }
