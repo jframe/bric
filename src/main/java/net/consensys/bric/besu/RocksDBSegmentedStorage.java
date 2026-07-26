@@ -106,7 +106,20 @@ public class RocksDBSegmentedStorage implements SegmentedKeyValueStorage {
 
     @Override
     public Stream<Pair<byte[], byte[]>> stream(SegmentIdentifier segment) {
-        throw new UnsupportedOperationException("Stream not implemented for read-only access");
+        ColumnFamilyHandle cfHandle = getColumnFamilyHandle(segment);
+        if (cfHandle == null) {
+            return Stream.empty();
+        }
+
+        List<Pair<byte[], byte[]>> results = new ArrayList<>();
+        try (RocksIterator iterator = dbManager.getDatabase().newIterator(cfHandle)) {
+            iterator.seekToFirst();
+            while (iterator.isValid()) {
+                results.add(Pair.of(iterator.key(), iterator.value()));
+                iterator.next();
+            }
+        }
+        return results.stream();
     }
 
     @Override
