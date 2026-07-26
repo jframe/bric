@@ -4,13 +4,19 @@ import net.consensys.bric.db.BesuDatabaseManager;
 import net.consensys.bric.db.KeyValueSegmentIdentifier;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
+import org.rocksdb.WriteBatch;
+import org.rocksdb.WriteOptions;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -109,9 +115,21 @@ public class RocksDBSegmentedStorage implements SegmentedKeyValueStorage {
     }
 
     @Override
-    public Stream<Pair<byte[], byte[]>> streamFromKey(
-            SegmentIdentifier segment, byte[] startKey, byte[] endKey) {
-        throw new UnsupportedOperationException("Stream not implemented for read-only access");
+    public Stream<Pair<byte[], byte[]>> streamFromKey(SegmentIdentifier segment, byte[] startKey, byte[] endKey) {
+        ColumnFamilyHandle cfHandle = getColumnFamilyHandle(segment);
+        if (cfHandle == null) {
+            return Stream.empty();
+        }
+
+        List<Pair<byte[], byte[]>> results = new ArrayList<>();
+        try (RocksIterator iterator = dbManager.getDatabase().newIterator(cfHandle)) {
+            iterator.seek(startKey);
+            while (iterator.isValid() && Arrays.compareUnsigned(iterator.key(), endKey) <= 0) {
+                results.add(Pair.of(iterator.key(), iterator.value()));
+                iterator.next();
+            }
+        }
+        return results.stream();
     }
 
     @Override
@@ -136,12 +154,27 @@ public class RocksDBSegmentedStorage implements SegmentedKeyValueStorage {
 
     @Override
     public SegmentedKeyValueStorageTransaction startTransaction() {
-        throw new UnsupportedOperationException("Transactions not supported in read-only mode");
+        if (!dbManager.isWritable()) {
+            throw new UnsupportedOperationException("Transactions not supported in read-only mode");
+        }
+        return new RocksDBSegmentedTransaction();
     }
 
     @Override
     public boolean tryDelete(SegmentIdentifier segment, byte[] key) {
-        throw new UnsupportedOperationException("Delete not supported in read-only mode");
+        if (!dbManager.isWritable()) {
+            throw new UnsupportedOperationException("Delete not supported in read-only mode");
+        }
+        try {
+            ColumnFamilyHandle cfHandle = getColumnFamilyHandle(segment);
+            if (cfHandle == null) {
+                return false;
+            }
+            dbManager.getDatabase().delete(cfHandle, key);
+            return true;
+        } catch (RocksDBException e) {
+            return false;
+        }
     }
 
     @Override
@@ -172,5 +205,47 @@ public class RocksDBSegmentedStorage implements SegmentedKeyValueStorage {
         }
 
         return null;
+    }
+
+    /** Batches puts/removes across segments and commits them atomically via a RocksDB WriteBatch. */
+    private final class RocksDBSegmentedTransaction implements SegmentedKeyValueStorageTransaction {
+        private final WriteBatch batch = new WriteBatch();
+
+        @Override
+        public void put(SegmentIdentifier segment, byte[] key, byte[] value) {
+            try {
+                batch.put(getColumnFamilyHandle(segment), key, value);
+            } catch (RocksDBException e) {
+                throw new StorageException("Failed to stage put", e);
+            }
+        }
+
+        @Override
+        public void remove(SegmentIdentifier segment, byte[] key) {
+            try {
+                batch.delete(getColumnFamilyHandle(segment), key);
+            } catch (RocksDBException e) {
+                throw new StorageException("Failed to stage remove", e);
+            }
+        }
+
+        @Override
+        public void commit() {
+            try (WriteOptions writeOptions = new WriteOptions()) {
+                dbManager.getDatabase().write(writeOptions, batch);
+            } catch (RocksDBException e) {
+                throw new StorageException("Failed to commit transaction", e);
+            }
+        }
+
+        @Override
+        public void rollback() {
+            batch.clear();
+        }
+
+        @Override
+        public void close() {
+            batch.close();
+        }
     }
 }
