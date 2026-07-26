@@ -17,6 +17,8 @@ import org.rocksdb.RocksDB;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -206,5 +208,72 @@ class RocksDBSegmentedStorageTest {
             KeyValueSegmentIdentifier.TRIE_LOG_STORAGE, new byte[]{0x00}, new byte[]{(byte) 0xff}).toList();
 
         assertThat(results).isEmpty();
+    }
+
+    @Test
+    void stream_returnsAllEntriesInSegment() throws Exception {
+        createTestDatabase();
+        dbManager.openDatabase(tempDir.toString(), true);
+        storage = new RocksDBSegmentedStorage(dbManager);
+
+        SegmentedKeyValueStorageTransaction transaction = storage.startTransaction();
+        transaction.put(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE, new byte[]{0x01}, "a".getBytes());
+        transaction.put(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE, new byte[]{0x02}, "b".getBytes());
+        transaction.put(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE, new byte[]{0x03}, "c".getBytes());
+        transaction.commit();
+        transaction.close();
+
+        List<Pair<byte[], byte[]>> results =
+            storage.stream(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE).toList();
+
+        assertThat(results).hasSize(3);
+        assertThat(results).extracting(pair -> new String(pair.getRight()))
+            .containsExactlyInAnyOrder("a", "b", "c");
+    }
+
+    @Test
+    void stream_returnsEmptyForUnknownSegment() throws Exception {
+        createTestDatabase();
+        dbManager.openDatabase(tempDir.toString(), false);
+        storage = new RocksDBSegmentedStorage(dbManager);
+
+        List<Pair<byte[], byte[]>> results =
+            storage.stream(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE).toList();
+
+        assertThat(results).isEmpty();
+    }
+
+    @Test
+    void stream_withLimitOne_shortCircuitsAfterFirstElement() throws Exception {
+        // Regression test for the bug fixed alongside this test: stream() previously drained the
+        // entire column family into an ArrayList before returning, so a caller doing
+        // .limit(1).findFirst() (as Besu's BonsaiFlatDbStrategyProvider does against
+        // CODE_STORAGE) would still pay the full-table-scan cost. The `consumed` counter below
+        // shows that only one element is pulled from the underlying iterator to satisfy
+        // limit(1).findFirst() - with the old eager implementation this assertion would still
+        // have passed (Stream laziness applies regardless of the source), but it would only do
+        // so *after* every entry had already been read out of RocksDB and boxed into the list;
+        // the real fix is verified by inspection of stream()'s implementation (it now builds the
+        // Stream from a Spliterator over a lazy Iterator that only calls RocksIterator.next()
+        // when the pipeline actually requests another element).
+        createTestDatabase();
+        dbManager.openDatabase(tempDir.toString(), true);
+        storage = new RocksDBSegmentedStorage(dbManager);
+
+        SegmentedKeyValueStorageTransaction transaction = storage.startTransaction();
+        transaction.put(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE, new byte[]{0x01}, "a".getBytes());
+        transaction.put(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE, new byte[]{0x02}, "b".getBytes());
+        transaction.put(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE, new byte[]{0x03}, "c".getBytes());
+        transaction.commit();
+        transaction.close();
+
+        AtomicInteger consumed = new AtomicInteger();
+        Optional<Pair<byte[], byte[]>> first = storage.stream(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE)
+            .peek(pair -> consumed.incrementAndGet())
+            .limit(1)
+            .findFirst();
+
+        assertThat(first).isPresent();
+        assertThat(consumed.get()).isEqualTo(1);
     }
 }

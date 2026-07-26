@@ -16,11 +16,16 @@ import org.rocksdb.WriteOptions;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /**
  * Adapter that wraps our RocksDB database to implement Besu's SegmentedKeyValueStorage interface.
@@ -111,15 +116,40 @@ public class RocksDBSegmentedStorage implements SegmentedKeyValueStorage {
             return Stream.empty();
         }
 
-        List<Pair<byte[], byte[]>> results = new ArrayList<>();
-        try (RocksIterator iterator = dbManager.getDatabase().newIterator(cfHandle)) {
-            iterator.seekToFirst();
-            while (iterator.isValid()) {
-                results.add(Pair.of(iterator.key(), iterator.value()));
-                iterator.next();
+        // Lazily wrap the RocksIterator so short-circuiting operations (e.g. Besu's
+        // BonsaiFlatDbStrategyProvider does stream(CODE_STORAGE).limit(1).findFirst()) stop
+        // reading after the first matching entry instead of buffering the whole column family.
+        RocksIterator iterator = dbManager.getDatabase().newIterator(cfHandle);
+        iterator.seekToFirst();
+
+        Iterator<Pair<byte[], byte[]>> resultIterator = new Iterator<>() {
+            @Override
+            public boolean hasNext() {
+                return iterator.isValid();
             }
-        }
-        return results.stream();
+
+            @Override
+            public Pair<byte[], byte[]> next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                Pair<byte[], byte[]> pair = Pair.of(iterator.key(), iterator.value());
+                iterator.next();
+                return pair;
+            }
+        };
+
+        Spliterator<Pair<byte[], byte[]>> spliterator = Spliterators.spliteratorUnknownSize(
+            resultIterator, Spliterator.ORDERED | Spliterator.NONNULL);
+        // Close the RocksIterator when the stream is closed. Note: callers that consume the
+        // stream via a short-circuiting terminal op (e.g. limit(1).findFirst()) without an
+        // explicit try-with-resources on the Stream itself will not trigger this close, leaving
+        // the native iterator to be reclaimed on process exit/GC finalization. This mirrors the
+        // one-shot, short-lived CLI usage of this class (e.g. FlatDbHealer's constructor, run
+        // once per `db upgrade-flatdb` invocation) rather than a long-running server, so the
+        // bounded, single-iterator leak is an acceptable tradeoff versus eagerly draining the
+        // whole column family.
+        return StreamSupport.stream(spliterator, false).onClose(iterator::close);
     }
 
     @Override
