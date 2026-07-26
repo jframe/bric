@@ -210,4 +210,78 @@ class FlatDbHealerTest {
         BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
         assertThat(verifyWorldState.getAccount(missingHash)).isEmpty();
     }
+
+    /** Builds a real, persisted storage trie for one account and returns its root. */
+    private static Hash seedStorageTrie(
+            BonsaiWorldStateKeyValueStorage worldState, Hash accountHash, Map<Bytes32, Bytes> slots) {
+        StoredMerklePatriciaTrie<Bytes, Bytes> trie = new StoredMerklePatriciaTrie<>(
+            (location, hash) -> Optional.empty(), Function.identity(), Function.identity());
+        slots.forEach(trie::put);
+
+        BonsaiWorldStateKeyValueStorage.Updater updater = worldState.updater();
+        trie.commit((location, hash, node) ->
+            updater.putAccountStorageTrieNode(accountHash, location, hash, node));
+        Bytes32 rootHash = trie.getRootHash();
+        updater.commit();
+        return Hash.wrap(rootHash);
+    }
+
+    private static void seedFlatStorage(
+            BonsaiWorldStateKeyValueStorage worldState, Hash accountHash, Hash slotHash, Bytes value) {
+        BonsaiWorldStateKeyValueStorage.Updater updater = worldState.updater();
+        updater.putStorageValueBySlotHash(accountHash, slotHash, value);
+        updater.commit();
+    }
+
+    @Test
+    void healAccountStorage_addsMissingUpdatesStaleAndRemovesOrphan() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+
+        Hash matchingSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(10)));
+        Hash missingSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(20)));
+        Hash staleSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(30)));
+        Hash orphanSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(40)));
+
+        Bytes matchingValue = Bytes.of(1);
+        Bytes missingValue = Bytes.of(2);
+        Bytes staleValueInTrie = Bytes.of(3);
+        Bytes staleValueInFlat = Bytes.of(99);
+        Bytes orphanValue = Bytes.of(4);
+
+        Hash storageRoot = seedStorageTrie(fixtureWorldState, accountHash, Map.of(
+            matchingSlot, matchingValue,
+            missingSlot, missingValue,
+            staleSlot, staleValueInTrie));
+
+        seedFlatStorage(fixtureWorldState, accountHash, matchingSlot, matchingValue);
+        seedFlatStorage(fixtureWorldState, accountHash, staleSlot, staleValueInFlat);
+        seedFlatStorage(fixtureWorldState, accountHash, orphanSlot, orphanValue);
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealer.StorageRangeOutcome outcome =
+            healer.healAccountStorage(accountHash, storageRoot, false);
+
+        assertThat(outcome.slotsChecked).isEqualTo(3);
+        assertThat(outcome.added).isEqualTo(1);
+        assertThat(outcome.updated).isEqualTo(1);
+        assertThat(outcome.removed).isEqualTo(1);
+
+        // Read the flat table directly (not via getStorageValueByStorageSlotKey, which derives
+        // storageRoot from getAccount(accountHash) — this test never seeds a flat account entry,
+        // since it's testing storage healing in isolation from account healing).
+        RocksDBSegmentedStorage verifyStorage = new RocksDBSegmentedStorage(dbManager);
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, matchingSlot).toArrayUnsafe()))
+            .contains(matchingValue.toArrayUnsafe());
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, missingSlot).toArrayUnsafe()))
+            .contains(missingValue.toArrayUnsafe());
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, staleSlot).toArrayUnsafe()))
+            .contains(staleValueInTrie.toArrayUnsafe());
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, orphanSlot).toArrayUnsafe()))
+            .isEmpty();
+    }
 }
