@@ -55,14 +55,12 @@ public class FlatDbHealer {
         try {
             flatDbStrategyProvider.loadFlatDbStrategy(storage);
         } catch (UnsupportedOperationException e) {
-            // Besu's loadFlatDbStrategy() always attempts to persist a metadata write-back
-            // (the flat DB mode byte and a "use code storage by hash" flag) on first load,
-            // because its in-memory flatDbMode field starts null and therefore never equals
-            // the freshly-derived mode. That write-back calls storage.startTransaction(),
-            // which RocksDBSegmentedStorage correctly rejects when the underlying database
-            // was opened read-only. Skipping it is harmless here: bric's own heal logic never
-            // depends on the persisted "use code storage by hash" flag, and dry-run callers
-            // only need to read the strategy, not persist it.
+            // Besu's loadFlatDbStrategy() persists the flat DB mode byte via
+            // storage.startTransaction() whenever that byte isn't already on disk (e.g. a
+            // database created before this metadata key existed) — which RocksDBSegmentedStorage
+            // correctly rejects when the underlying database was opened read-only. Skipping it
+            // is harmless here: dry-run callers only need to read the derived strategy, not
+            // persist it, and bric's own heal logic doesn't depend on this write having happened.
             LOG.debug("Skipping flat DB metadata write-back; database is read-only.", e);
         }
         this.worldState = new BonsaiWorldStateKeyValueStorage(
