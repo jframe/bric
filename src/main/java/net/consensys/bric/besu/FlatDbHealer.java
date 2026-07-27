@@ -31,6 +31,7 @@ import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.function.LongConsumer;
 
 /**
  * Reconciles a Bonsai database's flat account/storage tables against the canonical
@@ -122,7 +123,10 @@ public class FlatDbHealer {
                 new ArrayList<>(RangeManager.generateAllRanges(RANGE_COUNT).entrySet());
             for (int i = startRangeIndex; i < ranges.size(); i++) {
                 Map.Entry<Bytes32, Bytes32> range = ranges.get(i);
-                AccountRangeOutcome outcome = healAccountRange(stateRoot, range.getKey(), range.getValue(), dryRun);
+                int rangeNumber = i + 1;
+                AccountRangeOutcome outcome = healAccountRange(
+                    stateRoot, range.getKey(), range.getValue(), dryRun, DEFAULT_BATCH_LIMIT,
+                    scanned -> listener.onRangeProgress(rangeNumber, ranges.size(), scanned));
                 accountsAdded += outcome.added;
                 accountsUpdated += outcome.updated;
                 accountsRemoved += outcome.removed;
@@ -280,6 +284,12 @@ public class FlatDbHealer {
      */
     AccountRangeOutcome healAccountRange(
             Bytes32 stateRoot, Bytes32 startKeyHash, Bytes32 endKeyHash, boolean dryRun, int batchLimit) {
+        return healAccountRange(stateRoot, startKeyHash, endKeyHash, dryRun, batchLimit, scanned -> {});
+    }
+
+    AccountRangeOutcome healAccountRange(
+            Bytes32 stateRoot, Bytes32 startKeyHash, Bytes32 endKeyHash, boolean dryRun, int batchLimit,
+            LongConsumer onBatchScanned) {
         MerkleTrie<Bytes, Bytes> accountTrie = new StoredMerklePatriciaTrie<>(
             worldState::getAccountStateTrieNode, stateRoot, Function.identity(), Function.identity());
 
@@ -353,6 +363,9 @@ public class FlatDbHealer {
             if (lastBatch) {
                 break;
             }
+            // Report the running in-range total after each non-final batch so a range spanning many
+            // batches shows incremental progress; the final batch's total is left to onRangeComplete.
+            onBatchScanned.accept(accountsChecked);
             batchStart = nextKey(trieBatch.lastKey());
         }
 

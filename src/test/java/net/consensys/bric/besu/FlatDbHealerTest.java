@@ -347,6 +347,28 @@ class FlatDbHealerTest {
     }
 
     @Test
+    void healAccountRange_reportsIncrementalBatchProgressForMultiBatchRange() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash h10 = Hash.wrap(Bytes32.leftPad(Bytes.of(10)));
+        Hash h20 = Hash.wrap(Bytes32.leftPad(Bytes.of(20)));
+        Hash h30 = Hash.wrap(Bytes32.leftPad(Bytes.of(30)));
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(
+            h10, accountRlp(10, Hash.EMPTY),
+            h20, accountRlp(20, Hash.EMPTY),
+            h30, accountRlp(30, Hash.EMPTY)));
+
+        List<Long> progress = new ArrayList<>();
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        healer.healAccountRange(
+            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, true, 2, progress::add);
+
+        // Batch limit 2 over 3 leaves = two batches. Only the first (non-final) batch reports
+        // incremental progress, carrying the running in-range scanned count (2). The final batch's
+        // total is left to onRangeComplete, so it must NOT also fire a progress event.
+        assertThat(progress).containsExactly(2L);
+    }
+
+    @Test
     void healAccountStorage_batchesTrieWalkWithoutLoadingWholeRange() throws Exception {
         BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
         Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));

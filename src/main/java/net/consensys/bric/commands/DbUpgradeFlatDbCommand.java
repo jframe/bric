@@ -87,6 +87,12 @@ public class DbUpgradeFlatDbCommand implements Command {
         }
 
         @Override
+        public void onRangeProgress(int rangeIndex, int totalRanges, long accountsScannedInRange) {
+            System.out.println("Range " + rangeIndex + "/" + totalRanges + " - "
+                + accountsScannedInRange + " accounts scanned...");
+        }
+
+        @Override
         public void onStorageAccountComplete(
                 int accountsHealed, int totalAccountsToHeal, long slotsChecked, long slotsFixed) {
             System.out.println("Storage " + accountsHealed + "/" + totalAccountsToHeal + " accounts - "
