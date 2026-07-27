@@ -32,6 +32,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FlatDbHealerTest {
@@ -55,12 +56,12 @@ class FlatDbHealerTest {
     }
 
     /**
-     * Creates the column families a real Bonsai database has, opens it via
-     * BesuDatabaseManager in write mode, and returns a BonsaiWorldStateKeyValueStorage
-     * built the same way FlatDbHealer builds its own — used only to seed fixture data
-     * (trie nodes, flat entries, the worldRoot key) that FlatDbHealer will later read.
+     * Creates the column families a real Bonsai database has, without opening it via
+     * BesuDatabaseManager or ever touching its flat DB mode metadata. Used as the shared
+     * base for both the writable fixture helper and the "never-before-loaded, read-only"
+     * regression fixture below.
      */
-    private BonsaiWorldStateKeyValueStorage openWritableFixtureDatabase() throws Exception {
+    private void createFixtureDatabaseSchema() throws Exception {
         List<ColumnFamilyDescriptor> descriptors = List.of(
             new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY),
             new ColumnFamilyDescriptor(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getId()),
@@ -78,6 +79,16 @@ class FlatDbHealerTest {
                 handle.close();
             }
         }
+    }
+
+    /**
+     * Creates the column families a real Bonsai database has, opens it via
+     * BesuDatabaseManager in write mode, and returns a BonsaiWorldStateKeyValueStorage
+     * built the same way FlatDbHealer builds its own — used only to seed fixture data
+     * (trie nodes, flat entries, the worldRoot key) that FlatDbHealer will later read.
+     */
+    private BonsaiWorldStateKeyValueStorage openWritableFixtureDatabase() throws Exception {
+        createFixtureDatabaseSchema();
 
         dbManager.openDatabase(tempDir.toString(), true);
         return buildWorldState(dbManager);
@@ -90,6 +101,29 @@ class FlatDbHealerTest {
         flatDbStrategyProvider.loadFlatDbStrategy(storage);
         return new BonsaiWorldStateKeyValueStorage(
             flatDbStrategyProvider, storage, new NoOpKeyValueStorage());
+    }
+
+    /**
+     * Regression test for the bug where FlatDbHealer's constructor could never succeed
+     * against a read-only-opened database: Besu's BonsaiFlatDbStrategyProvider.loadFlatDbStrategy()
+     * always attempts a metadata write-back on first load (its in-memory flatDbMode field starts
+     * null, so it never matches the freshly-derived mode), which calls storage.startTransaction()
+     * and RocksDBSegmentedStorage correctly rejects that when the database isn't writable. This
+     * made `db upgrade-flatdb --dry-run` unusable against a database opened read-only, which is
+     * exactly how dry-run is meant to be used.
+     *
+     * <p>Crucially, the schema is created directly (never opened in write mode, never run through
+     * buildWorldState/loadFlatDbStrategy first): once the flat DB mode metadata has been persisted
+     * once, Besu's loadFlatDbStrategy() reads it back directly without attempting the write-back,
+     * so re-using openWritableFixtureDatabase() here would not actually exercise the bug.
+     */
+    @Test
+    void constructor_succeedsAgainstNeverBeforeLoadedReadOnlyDatabase() throws Exception {
+        createFixtureDatabaseSchema();
+
+        dbManager.openDatabase(tempDir.toString(), false);
+
+        assertThatCode(() -> new FlatDbHealer(dbManager)).doesNotThrowAnyException();
     }
 
     @Test

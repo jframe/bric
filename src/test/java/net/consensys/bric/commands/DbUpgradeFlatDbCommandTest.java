@@ -61,8 +61,10 @@ class DbUpgradeFlatDbCommandTest {
         when(mockDbManager.isWritable()).thenReturn(false);
         command.execute(new String[]{"--dry-run"});
         // Fails later (no real database behind the mock), but must get past the write-mode guard.
-        // The specific "Reopen with 'db open <path> --write'" message should not appear
-        assertThat(errorStream.toString()).doesNotContain("Reopen with");
+        // The failure must not be attributed to read-only mode: --dry-run works against a
+        // read-only-opened database now that FlatDbHealer tolerates Besu's rejected metadata
+        // write-back (see FlatDbHealer's constructor).
+        assertThat(errorStream.toString()).doesNotContain("read-only mode");
     }
 
     @Test
