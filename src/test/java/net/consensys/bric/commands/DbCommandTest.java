@@ -196,4 +196,16 @@ class DbCommandTest {
         assertThat(usage).contains("db compact-status");
         assertThat(usage).contains("db compact-cancel");
     }
+
+    @Test
+    void testExecuteUpgradeFlatDbSubcommand() {
+        when(mockDbManager.isOpen()).thenReturn(false);
+        command.execute(new String[]{"upgrade-flatdb"});
+        assertThat(errorStream.toString()).contains("No database is open");
+    }
+
+    @Test
+    void testUsageMentionsUpgradeFlatDb() {
+        assertThat(command.getUsage()).contains("db upgrade-flatdb");
+    }
 }

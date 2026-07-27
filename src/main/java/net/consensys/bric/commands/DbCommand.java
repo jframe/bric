@@ -26,6 +26,7 @@ public class DbCommand implements Command {
     private final DbCompactCommand compactCommand;
     private final DbCompactStatusCommand compactStatusCommand;
     private final DbCompactCancelCommand compactCancelCommand;
+    private final DbUpgradeFlatDbCommand upgradeFlatDbCommand;
 
     public DbCommand(BesuDatabaseManager dbManager) {
         this.dbManager = dbManager;
@@ -40,6 +41,7 @@ public class DbCommand implements Command {
         this.compactCommand = new DbCompactCommand(dbManager);
         this.compactStatusCommand = new DbCompactStatusCommand(dbManager);
         this.compactCancelCommand = new DbCompactCancelCommand(dbManager);
+        this.upgradeFlatDbCommand = new DbUpgradeFlatDbCommand(dbManager);
     }
 
     @Override
@@ -87,6 +89,9 @@ public class DbCommand implements Command {
             case "compact-cancel":
                 compactCancelCommand.execute(subArgs);
                 break;
+            case "upgrade-flatdb":
+                upgradeFlatDbCommand.execute(subArgs);
+                break;
             default:
                 System.err.println("Error: Unknown subcommand '" + subcommand + "'");
                 System.err.println("Usage: " + getUsage());
@@ -114,6 +119,7 @@ public class DbCommand implements Command {
                "                                 db compact <segment...|--all>              - Submit async manual compactions (requires --write)\n" +
                "                                 db compact-status [<job-id>]               - Show compaction job status\n" +
                "                                 db compact-cancel <job-id>                 - Cancel a running compaction job (requires --write)\n" +
+               "                                 db upgrade-flatdb [--dry-run]              - Upgrade flat DB from PARTIAL to FULL\n" +
                "\n" +
                "                               Column Family Formats (<segment>):\n" +
                "                                 Predefined segment names (ACCOUNT_INFO_STATE, CODE_STORAGE, etc.)\n" +

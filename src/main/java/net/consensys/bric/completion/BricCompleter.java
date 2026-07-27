@@ -24,7 +24,7 @@ public class BricCompleter implements Completer {
     private final FileNameCompleter fileCompleter;
     private static final Set<String> DB_SUBCOMMANDS = Set.of(
         "open", "close", "info", "get", "put", "scan", "drop-cf", "stats",
-        "compact", "compact-status", "compact-cancel");
+        "compact", "compact-status", "compact-cancel", "upgrade-flatdb");
     private static final Set<String> EXIT_COMMANDS = Set.of("exit", "quit");
 
     private static final Set<String> SEGMENT_NAMES = Stream.of(KeyValueSegmentIdentifier.values())
