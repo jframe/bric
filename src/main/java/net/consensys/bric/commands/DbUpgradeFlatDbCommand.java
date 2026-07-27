@@ -50,8 +50,8 @@ public class DbUpgradeFlatDbCommand implements Command {
         FlatDbHealer healer;
         try {
             healer = new FlatDbHealer(dbManager);
-        } catch (Exception e) {
-            System.err.println("Error: Failed to initialize database healer");
+        } catch (Throwable e) {
+            System.err.println("Error: Failed to initialize database healer: " + e.getMessage());
             return;
         }
 

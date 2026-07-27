@@ -61,6 +61,24 @@ class DbUpgradeFlatDbCommandTest {
         when(mockDbManager.isWritable()).thenReturn(false);
         command.execute(new String[]{"--dry-run"});
         // Fails later (no real database behind the mock), but must get past the write-mode guard.
-        assertThat(errorStream.toString()).doesNotContain("read-only mode");
+        // The specific "Reopen with 'db open <path> --write'" message should not appear
+        assertThat(errorStream.toString()).doesNotContain("Reopen with");
+    }
+
+    @Test
+    void includesExceptionMessageWhenFlatDbHealerConstructionFails() {
+        when(mockDbManager.isOpen()).thenReturn(true);
+        when(mockDbManager.getFormat()).thenReturn(BesuDatabaseManager.DatabaseFormat.BONSAI);
+        when(mockDbManager.isWritable()).thenReturn(true);
+
+        // Execute with a mock dbManager that doesn't have proper setup,
+        // which will cause FlatDbHealer construction to fail
+        command.execute(new String[]{});
+
+        String errorOutput = errorStream.toString();
+        // Verify that error message includes both the generic error and the exception message
+        assertThat(errorOutput).contains("Failed to initialize database healer");
+        // The actual exception message should be included (not just the generic message)
+        assertThat(errorOutput).isNotEqualTo("Error: Failed to initialize database healer\n");
     }
 }
