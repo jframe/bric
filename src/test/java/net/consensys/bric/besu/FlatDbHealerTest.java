@@ -292,6 +292,121 @@ class FlatDbHealerTest {
     }
 
     @Test
+    void healAccountRange_batchesTrieWalkWithoutLoadingWholeRange() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+
+        // Three trie accounts spread out enough to leave room for orphan flat entries both
+        // between them and after the last one.
+        Hash matchingHash = Hash.wrap(Bytes32.leftPad(Bytes.of(10)));
+        Hash staleHash = Hash.wrap(Bytes32.leftPad(Bytes.of(20)));
+        Hash missingHash = Hash.wrap(Bytes32.leftPad(Bytes.of(30)));
+
+        // Orphan flat entries with no trie leaf: one between the first two trie keys (caught in an
+        // early, count-limited batch), and two after the last trie key (only caught if the final
+        // batch extends its flat slice all the way to the range end rather than to the last trie key).
+        Hash orphanBetweenHash = Hash.wrap(Bytes32.leftPad(Bytes.of(15)));
+        Hash orphanAfterHash1 = Hash.wrap(Bytes32.leftPad(Bytes.of(25)));
+        Hash orphanAfterHash2 = Hash.wrap(Bytes32.leftPad(Bytes.of(35)));
+
+        byte[] matchingRlp = accountRlp(10, Hash.EMPTY);
+        byte[] staleRlpInTrie = accountRlp(20, Hash.EMPTY);
+        byte[] staleRlpInFlat = accountRlp(999, Hash.EMPTY);
+        byte[] missingRlp = accountRlp(30, Hash.EMPTY);
+        byte[] orphanRlp = accountRlp(40, Hash.EMPTY);
+
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(
+            matchingHash, matchingRlp,
+            staleHash, staleRlpInTrie,
+            missingHash, missingRlp));
+
+        seedFlatAccount(fixtureWorldState, matchingHash, matchingRlp);
+        seedFlatAccount(fixtureWorldState, staleHash, staleRlpInFlat);
+        seedFlatAccount(fixtureWorldState, orphanBetweenHash, orphanRlp);
+        seedFlatAccount(fixtureWorldState, orphanAfterHash1, orphanRlp);
+        seedFlatAccount(fixtureWorldState, orphanAfterHash2, orphanRlp);
+
+        // A batch limit of 2 forces at least two count-limited batches across the three trie leaves,
+        // exercising the resume-from-last-key paging that the whole-range walk never did.
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealer.AccountRangeOutcome outcome = healer.healAccountRange(
+            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, false, 2);
+
+        assertThat(outcome.accountsChecked).isEqualTo(3);
+        assertThat(outcome.added).isEqualTo(1);
+        assertThat(outcome.updated).isEqualTo(1);
+        assertThat(outcome.removed).isEqualTo(3);
+        assertThat(outcome.divergentAccounts).containsExactlyInAnyOrder(missingHash, staleHash);
+
+        BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
+        assertThat(verifyWorldState.getAccount(matchingHash)).contains(Bytes.wrap(matchingRlp));
+        assertThat(verifyWorldState.getAccount(staleHash)).contains(Bytes.wrap(staleRlpInTrie));
+        assertThat(verifyWorldState.getAccount(missingHash)).contains(Bytes.wrap(missingRlp));
+        assertThat(verifyWorldState.getAccount(orphanBetweenHash)).isEmpty();
+        assertThat(verifyWorldState.getAccount(orphanAfterHash1)).isEmpty();
+        assertThat(verifyWorldState.getAccount(orphanAfterHash2)).isEmpty();
+    }
+
+    @Test
+    void healAccountStorage_batchesTrieWalkWithoutLoadingWholeRange() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+
+        Hash matchingSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(10)));
+        Hash staleSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(20)));
+        Hash missingSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(30)));
+
+        Hash orphanBetweenSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(15)));
+        Hash orphanAfterSlot1 = Hash.wrap(Bytes32.leftPad(Bytes.of(25)));
+        Hash orphanAfterSlot2 = Hash.wrap(Bytes32.leftPad(Bytes.of(35)));
+
+        Bytes matchingValue = Bytes.of(1);
+        Bytes staleValueInTrie = Bytes.of(3);
+        Bytes staleValueInFlat = Bytes.of(99);
+        Bytes missingValue = Bytes.of(2);
+        Bytes orphanValue = Bytes.of(4);
+
+        Hash storageRoot = seedStorageTrie(fixtureWorldState, accountHash, Map.of(
+            matchingSlot, matchingValue,
+            staleSlot, staleValueInTrie,
+            missingSlot, missingValue));
+
+        seedFlatStorage(fixtureWorldState, accountHash, matchingSlot, matchingValue);
+        seedFlatStorage(fixtureWorldState, accountHash, staleSlot, staleValueInFlat);
+        seedFlatStorage(fixtureWorldState, accountHash, orphanBetweenSlot, orphanValue);
+        seedFlatStorage(fixtureWorldState, accountHash, orphanAfterSlot1, orphanValue);
+        seedFlatStorage(fixtureWorldState, accountHash, orphanAfterSlot2, orphanValue);
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealer.StorageRangeOutcome outcome =
+            healer.healAccountStorage(accountHash, storageRoot, false, 2);
+
+        assertThat(outcome.slotsChecked).isEqualTo(3);
+        assertThat(outcome.added).isEqualTo(1);
+        assertThat(outcome.updated).isEqualTo(1);
+        assertThat(outcome.removed).isEqualTo(3);
+
+        RocksDBSegmentedStorage verifyStorage = new RocksDBSegmentedStorage(dbManager);
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, matchingSlot).toArrayUnsafe()))
+            .contains(matchingValue.toArrayUnsafe());
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, staleSlot).toArrayUnsafe()))
+            .contains(staleValueInTrie.toArrayUnsafe());
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, missingSlot).toArrayUnsafe()))
+            .contains(missingValue.toArrayUnsafe());
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, orphanBetweenSlot).toArrayUnsafe()))
+            .isEmpty();
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, orphanAfterSlot1).toArrayUnsafe()))
+            .isEmpty();
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountHash, orphanAfterSlot2).toArrayUnsafe()))
+            .isEmpty();
+    }
+
+    @Test
     void healAccountRange_dryRun_reportsWithoutWriting() throws Exception {
         BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
         Hash missingHash = Hash.wrap(Bytes32.leftPad(Bytes.of(2)));

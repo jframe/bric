@@ -5,6 +5,7 @@ import net.consensys.bric.db.KeyValueSegmentIdentifier;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
@@ -42,6 +43,15 @@ public class FlatDbHealer {
     private static final Logger LOG = LoggerFactory.getLogger(FlatDbHealer.class);
 
     private static final int RANGE_COUNT = 16;
+    /**
+     * Upper bound on how many trie leaves a single {@link #healAccountRange}/{@link #healAccountStorage}
+     * batch pulls into memory at once. The trie walk resumes from the last key of each batch until the
+     * range is exhausted, so a whole 1/16 account range (or one contract's entire storage) is never
+     * materialised in a single {@code TreeMap} — that unbounded whole-range load was what OOM'd on
+     * mainnet-size state. Chosen to keep a batch's in-memory footprint well under a JVM's default heap
+     * (~a few MB per batch) while staying large enough that batching overhead is negligible.
+     */
+    private static final int DEFAULT_BATCH_LIMIT = 50_000;
     private static final byte[] CHECKPOINT_KEY = "bricFlatDbHealCheckpoint".getBytes(StandardCharsets.UTF_8);
     private static final byte[] PENDING_STORAGE_ACCOUNTS_KEY =
         "bricFlatDbHealPendingStorageAccounts".getBytes(StandardCharsets.UTF_8);
@@ -255,64 +265,118 @@ public class FlatDbHealer {
 
     AccountRangeOutcome healAccountRange(
             Bytes32 stateRoot, Bytes32 startKeyHash, Bytes32 endKeyHash, boolean dryRun) {
+        return healAccountRange(stateRoot, startKeyHash, endKeyHash, dryRun, DEFAULT_BATCH_LIMIT);
+    }
+
+    /**
+     * Walks the account trie for {@code [startKeyHash, endKeyHash]} in batches of at most
+     * {@code batchLimit} leaves, diffing each batch against the matching flat-table slice and
+     * writing corrections as it goes, rather than materialising the whole range at once (which
+     * OOM'd on mainnet-size state). Consecutive batches tile the key space with no gaps — batch
+     * <em>n</em> resumes from the successor of batch <em>n-1</em>'s last key — so orphan flat
+     * entries between trie leaves are still detected, and the final batch extends its flat slice to
+     * {@code endKeyHash} so orphans past the last trie leaf are caught too. Aggregate counts and the
+     * divergent-account set are identical to a single whole-range pass; only the peak memory differs.
+     */
+    AccountRangeOutcome healAccountRange(
+            Bytes32 stateRoot, Bytes32 startKeyHash, Bytes32 endKeyHash, boolean dryRun, int batchLimit) {
         MerkleTrie<Bytes, Bytes> accountTrie = new StoredMerklePatriciaTrie<>(
             worldState::getAccountStateTrieNode, stateRoot, Function.identity(), Function.identity());
 
-        RangeStorageEntriesCollector collector = RangeStorageEntriesCollector.createCollector(
-            startKeyHash, endKeyHash, Integer.MAX_VALUE, Integer.MAX_VALUE);
-        TrieIterator<Bytes> visitor = RangeStorageEntriesCollector.createVisitor(collector);
-        NavigableMap<Bytes32, Bytes> trieAccounts = new TreeMap<>(accountTrie.entriesFrom(
-            root -> RangeStorageEntriesCollector.collectEntries(collector, visitor, root, startKeyHash)));
-
-        NavigableMap<Bytes32, Bytes> flatAccounts = readFlatRange(
-            KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE, startKeyHash.toArrayUnsafe(), endKeyHash.toArrayUnsafe());
-
-        List<Bytes32> toAdd = new ArrayList<>();
-        List<Bytes32> toUpdate = new ArrayList<>();
-        List<Bytes32> toRemove = new ArrayList<>();
-
-        for (Map.Entry<Bytes32, Bytes> entry : trieAccounts.entrySet()) {
-            Bytes flatValue = flatAccounts.get(entry.getKey());
-            if (flatValue == null) {
-                toAdd.add(entry.getKey());
-            } else if (!flatValue.equals(entry.getValue())) {
-                toUpdate.add(entry.getKey());
-            }
-        }
-        for (Bytes32 accountHash : flatAccounts.keySet()) {
-            if (!trieAccounts.containsKey(accountHash)) {
-                toRemove.add(accountHash);
-            }
-        }
-
-        if (!dryRun && !(toAdd.isEmpty() && toUpdate.isEmpty() && toRemove.isEmpty())) {
-            BonsaiWorldStateKeyValueStorage.Updater updater = worldState.updater();
-            for (Bytes32 accountHash : toAdd) {
-                updater.putAccountInfoState(Hash.wrap(accountHash), trieAccounts.get(accountHash));
-            }
-            for (Bytes32 accountHash : toUpdate) {
-                updater.putAccountInfoState(Hash.wrap(accountHash), trieAccounts.get(accountHash));
-            }
-            for (Bytes32 accountHash : toRemove) {
-                updater.removeAccountInfoState(Hash.wrap(accountHash));
-            }
-            updater.commit();
-        }
-
+        long accountsChecked = 0;
+        long added = 0;
+        long updated = 0;
+        long removed = 0;
         List<Hash> divergentAccounts = new ArrayList<>();
         Map<Hash, Bytes> divergentAccountValues = new HashMap<>();
-        toAdd.forEach(hash -> {
-            divergentAccounts.add(Hash.wrap(hash));
-            divergentAccountValues.put(Hash.wrap(hash), trieAccounts.get(hash));
-        });
-        toUpdate.forEach(hash -> {
-            divergentAccounts.add(Hash.wrap(hash));
-            divergentAccountValues.put(Hash.wrap(hash), trieAccounts.get(hash));
-        });
+
+        Bytes32 batchStart = startKeyHash;
+        while (true) {
+            NavigableMap<Bytes32, Bytes> trieBatch = collectTrieBatch(
+                accountTrie, batchStart, endKeyHash, batchLimit);
+            if (trieBatch.isEmpty()) {
+                break;
+            }
+
+            boolean lastBatch = trieBatch.size() < batchLimit || trieBatch.lastKey().compareTo(endKeyHash) >= 0;
+            Bytes32 flatSliceEnd = lastBatch ? endKeyHash : trieBatch.lastKey();
+            NavigableMap<Bytes32, Bytes> flatBatch = readFlatRange(
+                KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE,
+                batchStart.toArrayUnsafe(), flatSliceEnd.toArrayUnsafe());
+
+            List<Bytes32> toAdd = new ArrayList<>();
+            List<Bytes32> toUpdate = new ArrayList<>();
+            List<Bytes32> toRemove = new ArrayList<>();
+
+            for (Map.Entry<Bytes32, Bytes> entry : trieBatch.entrySet()) {
+                Bytes flatValue = flatBatch.get(entry.getKey());
+                if (flatValue == null) {
+                    toAdd.add(entry.getKey());
+                } else if (!flatValue.equals(entry.getValue())) {
+                    toUpdate.add(entry.getKey());
+                }
+            }
+            for (Bytes32 accountHash : flatBatch.keySet()) {
+                if (!trieBatch.containsKey(accountHash)) {
+                    toRemove.add(accountHash);
+                }
+            }
+
+            if (!dryRun && !(toAdd.isEmpty() && toUpdate.isEmpty() && toRemove.isEmpty())) {
+                BonsaiWorldStateKeyValueStorage.Updater updater = worldState.updater();
+                for (Bytes32 accountHash : toAdd) {
+                    updater.putAccountInfoState(Hash.wrap(accountHash), trieBatch.get(accountHash));
+                }
+                for (Bytes32 accountHash : toUpdate) {
+                    updater.putAccountInfoState(Hash.wrap(accountHash), trieBatch.get(accountHash));
+                }
+                for (Bytes32 accountHash : toRemove) {
+                    updater.removeAccountInfoState(Hash.wrap(accountHash));
+                }
+                updater.commit();
+            }
+
+            toAdd.forEach(hash -> {
+                divergentAccounts.add(Hash.wrap(hash));
+                divergentAccountValues.put(Hash.wrap(hash), trieBatch.get(hash));
+            });
+            toUpdate.forEach(hash -> {
+                divergentAccounts.add(Hash.wrap(hash));
+                divergentAccountValues.put(Hash.wrap(hash), trieBatch.get(hash));
+            });
+
+            accountsChecked += trieBatch.size();
+            added += toAdd.size();
+            updated += toUpdate.size();
+            removed += toRemove.size();
+
+            if (lastBatch) {
+                break;
+            }
+            batchStart = nextKey(trieBatch.lastKey());
+        }
 
         return new AccountRangeOutcome(
-            trieAccounts.size(), toAdd.size(), toUpdate.size(), toRemove.size(),
-            divergentAccounts, divergentAccountValues);
+            accountsChecked, added, updated, removed, divergentAccounts, divergentAccountValues);
+    }
+
+    /**
+     * Collects up to {@code batchLimit} trie leaves in {@code [batchStart, endKeyHash]}, starting the
+     * walk at {@code batchStart}. Shared by the account and storage phases, which differ only in the
+     * {@code trie} being walked.
+     */
+    private static NavigableMap<Bytes32, Bytes> collectTrieBatch(
+            MerkleTrie<Bytes, Bytes> trie, Bytes32 batchStart, Bytes32 endKeyHash, int batchLimit) {
+        RangeStorageEntriesCollector collector = RangeStorageEntriesCollector.createCollector(
+            batchStart, endKeyHash, batchLimit, Integer.MAX_VALUE);
+        TrieIterator<Bytes> visitor = RangeStorageEntriesCollector.createVisitor(collector);
+        return new TreeMap<>(trie.entriesFrom(
+            root -> RangeStorageEntriesCollector.collectEntries(collector, visitor, root, batchStart)));
+    }
+
+    /** The next 32-byte key after {@code key} (i.e. {@code key + 1}), used to resume a paged walk. */
+    private static Bytes32 nextKey(Bytes32 key) {
+        return UInt256.fromBytes(key).add(UInt256.ONE).toBytes();
     }
 
     private NavigableMap<Bytes32, Bytes> readFlatRange(
@@ -339,56 +403,88 @@ public class FlatDbHealer {
     }
 
     StorageRangeOutcome healAccountStorage(Hash accountHash, Hash storageRoot, boolean dryRun) {
+        return healAccountStorage(accountHash, storageRoot, dryRun, DEFAULT_BATCH_LIMIT);
+    }
+
+    /**
+     * Storage-phase counterpart of {@link #healAccountRange}: walks one account's storage trie in
+     * batches of at most {@code batchLimit} slots so a contract with millions of slots never
+     * materialises its entire storage in memory at once. Same paging/tiling guarantees as the
+     * account phase.
+     */
+    StorageRangeOutcome healAccountStorage(Hash accountHash, Hash storageRoot, boolean dryRun, int batchLimit) {
         MerkleTrie<Bytes, Bytes> storageTrie = new StoredMerklePatriciaTrie<>(
             (location, hash) -> worldState.getAccountStorageTrieNode(accountHash, location, hash),
             storageRoot, Function.identity(), Function.identity());
 
-        RangeStorageEntriesCollector collector = RangeStorageEntriesCollector.createCollector(
-            RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, Integer.MAX_VALUE, Integer.MAX_VALUE);
-        TrieIterator<Bytes> visitor = RangeStorageEntriesCollector.createVisitor(collector);
-        NavigableMap<Bytes32, Bytes> trieSlots = new TreeMap<>(storageTrie.entriesFrom(
-            root -> RangeStorageEntriesCollector.collectEntries(collector, visitor, root, RangeManager.MIN_RANGE)));
+        long slotsChecked = 0;
+        long added = 0;
+        long updated = 0;
+        long removed = 0;
 
-        NavigableMap<Bytes32, Bytes> flatSlots = readFlatStorageRange(accountHash);
-
-        List<Bytes32> toAdd = new ArrayList<>();
-        List<Bytes32> toUpdate = new ArrayList<>();
-        List<Bytes32> toRemove = new ArrayList<>();
-
-        for (Map.Entry<Bytes32, Bytes> entry : trieSlots.entrySet()) {
-            Bytes flatValue = flatSlots.get(entry.getKey());
-            if (flatValue == null) {
-                toAdd.add(entry.getKey());
-            } else if (!flatValue.equals(entry.getValue())) {
-                toUpdate.add(entry.getKey());
+        Bytes32 batchStart = RangeManager.MIN_RANGE;
+        while (true) {
+            NavigableMap<Bytes32, Bytes> trieSlots = collectTrieBatch(
+                storageTrie, batchStart, RangeManager.MAX_RANGE, batchLimit);
+            if (trieSlots.isEmpty()) {
+                break;
             }
+
+            boolean lastBatch =
+                trieSlots.size() < batchLimit || trieSlots.lastKey().compareTo(RangeManager.MAX_RANGE) >= 0;
+            Bytes32 flatSliceEnd = lastBatch ? RangeManager.MAX_RANGE : trieSlots.lastKey();
+            NavigableMap<Bytes32, Bytes> flatSlots = readFlatStorageRange(accountHash, batchStart, flatSliceEnd);
+
+            List<Bytes32> toAdd = new ArrayList<>();
+            List<Bytes32> toUpdate = new ArrayList<>();
+            List<Bytes32> toRemove = new ArrayList<>();
+
+            for (Map.Entry<Bytes32, Bytes> entry : trieSlots.entrySet()) {
+                Bytes flatValue = flatSlots.get(entry.getKey());
+                if (flatValue == null) {
+                    toAdd.add(entry.getKey());
+                } else if (!flatValue.equals(entry.getValue())) {
+                    toUpdate.add(entry.getKey());
+                }
+            }
+            for (Bytes32 slotHash : flatSlots.keySet()) {
+                if (!trieSlots.containsKey(slotHash)) {
+                    toRemove.add(slotHash);
+                }
+            }
+
+            if (!dryRun && !(toAdd.isEmpty() && toUpdate.isEmpty() && toRemove.isEmpty())) {
+                BonsaiWorldStateKeyValueStorage.Updater updater = worldState.updater();
+                for (Bytes32 slotHash : toAdd) {
+                    updater.putStorageValueBySlotHash(accountHash, Hash.wrap(slotHash), trieSlots.get(slotHash));
+                }
+                for (Bytes32 slotHash : toUpdate) {
+                    updater.putStorageValueBySlotHash(accountHash, Hash.wrap(slotHash), trieSlots.get(slotHash));
+                }
+                for (Bytes32 slotHash : toRemove) {
+                    updater.removeStorageValueBySlotHash(accountHash, Hash.wrap(slotHash));
+                }
+                updater.commit();
+            }
+
+            slotsChecked += trieSlots.size();
+            added += toAdd.size();
+            updated += toUpdate.size();
+            removed += toRemove.size();
+
+            if (lastBatch) {
+                break;
+            }
+            batchStart = nextKey(trieSlots.lastKey());
         }
-        for (Bytes32 slotHash : flatSlots.keySet()) {
-            if (!trieSlots.containsKey(slotHash)) {
-                toRemove.add(slotHash);
-            }
-        }
 
-        if (!dryRun && !(toAdd.isEmpty() && toUpdate.isEmpty() && toRemove.isEmpty())) {
-            BonsaiWorldStateKeyValueStorage.Updater updater = worldState.updater();
-            for (Bytes32 slotHash : toAdd) {
-                updater.putStorageValueBySlotHash(accountHash, Hash.wrap(slotHash), trieSlots.get(slotHash));
-            }
-            for (Bytes32 slotHash : toUpdate) {
-                updater.putStorageValueBySlotHash(accountHash, Hash.wrap(slotHash), trieSlots.get(slotHash));
-            }
-            for (Bytes32 slotHash : toRemove) {
-                updater.removeStorageValueBySlotHash(accountHash, Hash.wrap(slotHash));
-            }
-            updater.commit();
-        }
-
-        return new StorageRangeOutcome(trieSlots.size(), toAdd.size(), toUpdate.size(), toRemove.size());
+        return new StorageRangeOutcome(slotsChecked, added, updated, removed);
     }
 
-    private NavigableMap<Bytes32, Bytes> readFlatStorageRange(Hash accountHash) {
-        byte[] startKey = Bytes.concatenate(accountHash, RangeManager.MIN_RANGE).toArrayUnsafe();
-        byte[] endKey = Bytes.concatenate(accountHash, RangeManager.MAX_RANGE).toArrayUnsafe();
+    private NavigableMap<Bytes32, Bytes> readFlatStorageRange(
+            Hash accountHash, Bytes32 startSlotHash, Bytes32 endSlotHash) {
+        byte[] startKey = Bytes.concatenate(accountHash, startSlotHash).toArrayUnsafe();
+        byte[] endKey = Bytes.concatenate(accountHash, endSlotHash).toArrayUnsafe();
 
         NavigableMap<Bytes32, Bytes> result = new TreeMap<>();
         for (Pair<byte[], byte[]> entry : storage.streamFromKey(
