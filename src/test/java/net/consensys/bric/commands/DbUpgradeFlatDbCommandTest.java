@@ -75,6 +75,26 @@ class DbUpgradeFlatDbCommandTest {
     }
 
     @Test
+    void allowsBonsaiArchiveFormat() {
+        when(mockDbManager.isOpen()).thenReturn(true);
+        when(mockDbManager.getFormat()).thenReturn(BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE);
+        when(mockDbManager.isWritable()).thenReturn(false);
+        command.execute(new String[]{"--dry-run"});
+        // Fails later (no real database behind the mock), but must get past the format guard —
+        // BONSAI_ARCHIVE is no longer rejected as "not a Bonsai database".
+        assertThat(errorStream.toString()).doesNotContain("only supported for Bonsai databases");
+    }
+
+    @Test
+    void stillRefusesForestAndUnknownFormats() {
+        when(mockDbManager.isOpen()).thenReturn(true);
+        when(mockDbManager.getFormat()).thenReturn(BesuDatabaseManager.DatabaseFormat.UNKNOWN);
+        command.execute(new String[]{});
+        assertThat(errorStream.toString()).contains("only supported for Bonsai databases");
+        assertThat(errorStream.toString()).contains("UNKNOWN");
+    }
+
+    @Test
     void refusesWhenReadOnlyAndNotDryRun() {
         when(mockDbManager.isOpen()).thenReturn(true);
         when(mockDbManager.getFormat()).thenReturn(BesuDatabaseManager.DatabaseFormat.BONSAI);

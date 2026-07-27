@@ -30,7 +30,9 @@ public class DbUpgradeFlatDbCommand implements Command {
         }
 
         BesuDatabaseManager.DatabaseFormat format = dbManager.getFormat();
-        if (format != BesuDatabaseManager.DatabaseFormat.BONSAI) {
+        boolean isBonsai = format == BesuDatabaseManager.DatabaseFormat.BONSAI;
+        boolean isBonsaiArchive = format == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE;
+        if (!isBonsai && !isBonsaiArchive) {
             System.err.println(
                 "Error: Flat DB healing is only supported for Bonsai databases. Current format: " + format);
             return;
@@ -69,7 +71,7 @@ public class DbUpgradeFlatDbCommand implements Command {
             System.out.println("Would fix " + result.totalAccountsFixed() + " accounts and "
                 + result.totalSlotsFixed() + " storage slots.");
         } else {
-            System.out.println("Flat DB mode upgraded to FULL.");
+            System.out.println("Flat DB mode upgraded to " + (isBonsaiArchive ? "ARCHIVE" : "FULL") + ".");
             System.out.println(String.format(
                 "Done in %02d:%02d:%02d. Accounts: %d fixed. Storage slots: %d fixed.",
                 elapsed.toHoursPart(), elapsed.toMinutesPart(), elapsed.toSecondsPart(),
