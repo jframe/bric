@@ -59,7 +59,7 @@ public class DbUpgradeFlatDbCommand implements Command {
         FlatDbHealResult result;
         try {
             result = healer.heal(dryRun, new PrintingProgressListener());
-        } catch (IllegalStateException e) {
+        } catch (RuntimeException e) {
             System.err.println("Error: " + e.getMessage());
             return;
         }

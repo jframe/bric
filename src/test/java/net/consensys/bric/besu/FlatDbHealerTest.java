@@ -370,6 +370,56 @@ class FlatDbHealerTest {
             .get(KeyValueSegmentIdentifier.VARIABLES, "bricFlatDbHealCheckpoint".getBytes())).isEmpty();
     }
 
+    /**
+     * Regression test for the bug where heal()'s storage phase derived a divergent account's
+     * storage root from the *flat* table (via worldState.getAccount(accountHash)) rather than
+     * from the trie-derived value healAccountRange already computed. For an "updated" account
+     * (flat entry present but stale), Besu's BonsaiPartialFlatDbStrategy.getFlatAccount() only
+     * falls back to the trie when the flat entry is entirely *missing* — a present-but-stale
+     * entry is returned as-is, uncorrected. In dry-run (which never writes, so the account
+     * phase's fix is never durably committed before the storage phase runs), this meant
+     * healAccountStorage would walk the account's *stale* storage root instead of its real one.
+     * Here the stale flat RLP's storage root points at a hash with no nodes in
+     * TRIE_BRANCH_STORAGE at all, so the pre-fix code throws a MerkleTrieException instead of
+     * cleanly reporting the account's real storage drift.
+     */
+    @Test
+    void heal_dryRun_usesTrieDerivedStorageRootForAccountWithStaleFlatEntry() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        Hash realSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(50)));
+        Bytes realSlotValue = Bytes.of(9);
+
+        // The account's real, persisted storage trie (per the account trie's RLP below).
+        Hash realStorageRoot = seedStorageTrie(fixtureWorldState, accountHash, Map.of(realSlot, realSlotValue));
+
+        // A storage root with no nodes in TRIE_BRANCH_STORAGE at all — stands in for the stale
+        // flat RLP's storage root, which the bug would incorrectly use instead of realStorageRoot.
+        Hash staleStorageRoot = Hash.wrap(Bytes32.leftPad(Bytes.of(0x77)));
+
+        byte[] trieAccountRlp = accountRlp(1, realStorageRoot);
+        byte[] staleFlatAccountRlp = accountRlp(999, staleStorageRoot);
+
+        seedAccountTrie(fixtureWorldState, Map.of(accountHash, trieAccountRlp));
+        seedFlatAccount(fixtureWorldState, accountHash, staleFlatAccountRlp);
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+
+        FlatDbHealResult[] resultHolder = new FlatDbHealResult[1];
+        assertThatCode(() -> resultHolder[0] = healer.heal(true, FlatDbHealProgressListener.NO_OP))
+            .doesNotThrowAnyException();
+
+        FlatDbHealResult result = resultHolder[0];
+        assertThat(result.accountsUpdated).isEqualTo(1);
+        // Must reflect the account's real storage drift (realSlot, found via the correct
+        // trie-derived storage root) rather than crashing or reporting against the stale root.
+        assertThat(result.slotsAdded).isEqualTo(1);
+
+        // Dry-run: nothing actually written.
+        BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
+        assertThat(verifyWorldState.getAccount(accountHash)).contains(Bytes.wrap(staleFlatAccountRlp));
+    }
+
     @Test
     void heal_resumesFromCheckpointAfterSimulatedInterruption() throws Exception {
         BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();

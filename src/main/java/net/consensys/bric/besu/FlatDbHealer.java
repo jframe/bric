@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -80,6 +81,11 @@ public class FlatDbHealer {
         int startRangeIndex = 0;
         FlatDbHealCheckpoint.Phase resumePhase = FlatDbHealCheckpoint.Phase.ACCOUNTS;
         List<Hash> divergentAccounts = new ArrayList<>();
+        // Trie-derived RLP for every divergent account found *in this invocation's* account
+        // phase, keyed so the storage phase can use the already-computed correct value instead
+        // of re-reading the flat table (see heal()'s storage-phase loop below). Only populated
+        // for ranges actually processed by this call, never reloaded from the checkpoint.
+        Map<Hash, Bytes> divergentAccountValues = new HashMap<>();
 
         if (!dryRun) {
             Optional<FlatDbHealCheckpoint> checkpoint = readCheckpoint();
@@ -107,6 +113,7 @@ public class FlatDbHealer {
                 accountsUpdated += outcome.updated;
                 accountsRemoved += outcome.removed;
                 divergentAccounts.addAll(outcome.divergentAccounts);
+                divergentAccountValues.putAll(outcome.divergentAccountValues);
                 listener.onRangeComplete(
                     i + 1, ranges.size(), outcome.accountsChecked, outcome.added + outcome.updated + outcome.removed);
                 if (!dryRun) {
@@ -133,7 +140,15 @@ public class FlatDbHealer {
 
         while (!remainingAccounts.isEmpty()) {
             Hash accountHash = remainingAccounts.remove(0);
-            Optional<Bytes> accountValue = worldState.getAccount(accountHash);
+            // Prefer the trie-derived value already computed by this invocation's account phase
+            // (correct even for "updated" accounts, whose flat entry may still be stale at this
+            // point) over re-reading the flat table, which Besu's BonsaiPartialFlatDbStrategy
+            // only falls back to the trie for when the flat entry is entirely *missing* — not
+            // when it's merely stale. The fallback below only fires when resuming a non-dry-run
+            // run in a fresh process (no in-memory map), at which point the account phase's
+            // writes are already durably committed, so getAccount() is safe there.
+            Optional<Bytes> accountValue = Optional.ofNullable(divergentAccountValues.get(accountHash))
+                .or(() -> worldState.getAccount(accountHash));
             if (accountValue.isPresent()) {
                 Hash storageRoot = PmtStateTrieAccountValue.readFrom(RLP.input(accountValue.get())).getStorageRoot();
                 StorageRangeOutcome outcome = healAccountStorage(accountHash, storageRoot, dryRun);
@@ -151,8 +166,8 @@ public class FlatDbHealer {
         }
 
         if (!dryRun) {
-            clearCheckpoint();
             worldState.upgradeToFullFlatDbMode();
+            clearCheckpoint();
         }
 
         return new FlatDbHealResult(
@@ -214,14 +229,23 @@ public class FlatDbHealer {
         final long updated;
         final long removed;
         final List<Hash> divergentAccounts;
+        /**
+         * Trie-derived RLP value for every account in {@link #divergentAccounts} (both added and
+         * updated). Lets callers use the already-computed, correct value directly instead of
+         * re-reading it from the flat table, which is wrong for "updated" accounts whose flat
+         * entry is present but stale.
+         */
+        final Map<Hash, Bytes> divergentAccountValues;
 
         AccountRangeOutcome(
-                long accountsChecked, long added, long updated, long removed, List<Hash> divergentAccounts) {
+                long accountsChecked, long added, long updated, long removed,
+                List<Hash> divergentAccounts, Map<Hash, Bytes> divergentAccountValues) {
             this.accountsChecked = accountsChecked;
             this.added = added;
             this.updated = updated;
             this.removed = removed;
             this.divergentAccounts = divergentAccounts;
+            this.divergentAccountValues = divergentAccountValues;
         }
     }
 
@@ -272,11 +296,19 @@ public class FlatDbHealer {
         }
 
         List<Hash> divergentAccounts = new ArrayList<>();
-        toAdd.forEach(hash -> divergentAccounts.add(Hash.wrap(hash)));
-        toUpdate.forEach(hash -> divergentAccounts.add(Hash.wrap(hash)));
+        Map<Hash, Bytes> divergentAccountValues = new HashMap<>();
+        toAdd.forEach(hash -> {
+            divergentAccounts.add(Hash.wrap(hash));
+            divergentAccountValues.put(Hash.wrap(hash), trieAccounts.get(hash));
+        });
+        toUpdate.forEach(hash -> {
+            divergentAccounts.add(Hash.wrap(hash));
+            divergentAccountValues.put(Hash.wrap(hash), trieAccounts.get(hash));
+        });
 
         return new AccountRangeOutcome(
-            trieAccounts.size(), toAdd.size(), toUpdate.size(), toRemove.size(), divergentAccounts);
+            trieAccounts.size(), toAdd.size(), toUpdate.size(), toRemove.size(),
+            divergentAccounts, divergentAccountValues);
     }
 
     private NavigableMap<Bytes32, Bytes> readFlatRange(
