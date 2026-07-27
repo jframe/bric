@@ -284,4 +284,101 @@ class FlatDbHealerTest {
                 Bytes.concatenate(accountHash, orphanSlot).toArrayUnsafe()))
             .isEmpty();
     }
+
+    @Test
+    void heal_reconcilesAccountsAndTheirStorageThenUpgradesToFull() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        Hash missingSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(20)));
+        Bytes missingSlotValue = Bytes.of(7);
+
+        Hash storageRoot = seedStorageTrie(fixtureWorldState, accountHash, Map.of(missingSlot, missingSlotValue));
+        byte[] accountRlp = accountRlp(1, storageRoot);
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(accountHash, accountRlp));
+        // No flat account entry seeded at all: account is "missing", so its storage must be healed too.
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealResult result = healer.heal(false, FlatDbHealProgressListener.NO_OP);
+
+        assertThat(result.accountsAdded).isEqualTo(1);
+        assertThat(result.slotsAdded).isEqualTo(1);
+        assertThat(result.dryRun).isFalse();
+
+        BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
+        assertThat(verifyWorldState.getAccount(accountHash)).contains(Bytes.wrap(accountRlp));
+        assertThat(verifyWorldState.getStorageValueByStorageSlotKey(
+                accountHash, new org.hyperledger.besu.datatypes.StorageSlotKey(missingSlot, Optional.empty())))
+            .contains(missingSlotValue);
+
+        Optional<byte[]> flatDbMode = new net.consensys.bric.db.SegmentReader(dbManager)
+            .get(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE, "flatDbStatus".getBytes());
+        assertThat(flatDbMode).isPresent();
+        assertThat(flatDbMode.get()[0]).isEqualTo((byte) 0x01); // FULL, per FlatDbMode encoding
+    }
+
+    @Test
+    void heal_dryRun_reportsWithoutTouchingCheckpointOrData() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        byte[] accountRlp = accountRlp(1, Hash.EMPTY_TRIE_HASH);
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(accountHash, accountRlp));
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealResult result = healer.heal(true, FlatDbHealProgressListener.NO_OP);
+
+        assertThat(result.accountsAdded).isEqualTo(1);
+        assertThat(result.dryRun).isTrue();
+
+        BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
+        assertThat(verifyWorldState.getAccount(accountHash)).isEmpty();
+        assertThat(new net.consensys.bric.db.SegmentReader(dbManager)
+            .get(KeyValueSegmentIdentifier.VARIABLES, "bricFlatDbHealCheckpoint".getBytes())).isEmpty();
+    }
+
+    @Test
+    void heal_resumesFromCheckpointAfterSimulatedInterruption() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        byte[] accountRlp = accountRlp(1, Hash.EMPTY_TRIE_HASH);
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(accountHash, accountRlp));
+
+        // Simulate an interruption after range 0 of 16 completed by writing the checkpoint directly,
+        // without ever writing accountHash's flat entry (as if the process died mid-range-1).
+        BonsaiWorldStateKeyValueStorage.Updater updater = fixtureWorldState.updater();
+        updater.getWorldStateTransaction().put(
+            KeyValueSegmentIdentifier.VARIABLES, "bricFlatDbHealCheckpoint".getBytes(),
+            new FlatDbHealCheckpoint(stateRoot, FlatDbHealCheckpoint.Phase.ACCOUNTS, 1).encode());
+        updater.commit();
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealResult result = healer.heal(false, FlatDbHealProgressListener.NO_OP);
+
+        // accountHash falls in range 0 (its hash starts with 0x00...01, the very first range),
+        // which the simulated checkpoint marks already-done, so it must NOT be healed.
+        BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
+        assertThat(verifyWorldState.getAccount(accountHash)).isEmpty();
+        assertThat(result.accountsAdded).isEqualTo(0);
+    }
+
+    @Test
+    void heal_discardsStaleCheckpointWhenStateRootHasMoved() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        byte[] accountRlp = accountRlp(1, Hash.EMPTY_TRIE_HASH);
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(accountHash, accountRlp));
+
+        Bytes32 staleRoot = Bytes32.leftPad(Bytes.of(0x7f));
+        BonsaiWorldStateKeyValueStorage.Updater updater = fixtureWorldState.updater();
+        updater.getWorldStateTransaction().put(
+            KeyValueSegmentIdentifier.VARIABLES, "bricFlatDbHealCheckpoint".getBytes(),
+            new FlatDbHealCheckpoint(staleRoot, FlatDbHealCheckpoint.Phase.ACCOUNTS, 1).encode());
+        updater.commit();
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealResult result = healer.heal(false, FlatDbHealProgressListener.NO_OP);
+
+        // Stale checkpoint discarded, so the full walk runs and finds accountHash missing.
+        assertThat(result.accountsAdded).isEqualTo(1);
+    }
 }

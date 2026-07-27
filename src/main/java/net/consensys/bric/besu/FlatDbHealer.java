@@ -6,20 +6,27 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.RangeStorageEntriesCollector;
 import org.hyperledger.besu.ethereum.trie.TrieIterator;
+import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Function;
 
@@ -30,6 +37,13 @@ import java.util.function.Function;
  * running node — see docs/superpowers/specs/2026-07-24-flatdb-heal-design.md).
  */
 public class FlatDbHealer {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FlatDbHealer.class);
+
+    private static final int RANGE_COUNT = 16;
+    private static final byte[] CHECKPOINT_KEY = "bricFlatDbHealCheckpoint".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] PENDING_STORAGE_ACCOUNTS_KEY =
+        "bricFlatDbHealPendingStorageAccounts".getBytes(StandardCharsets.UTF_8);
 
     private final RocksDBSegmentedStorage storage;
     private final BonsaiWorldStateKeyValueStorage worldState;
@@ -48,6 +62,135 @@ public class FlatDbHealer {
             .map(Bytes32::wrap)
             .orElseThrow(() -> new IllegalStateException(
                 "No world state root found; database may be empty or not yet synced."));
+    }
+
+    public FlatDbHealResult heal(boolean dryRun, FlatDbHealProgressListener listener) {
+        Bytes32 stateRoot = getTargetStateRoot();
+
+        int startRangeIndex = 0;
+        FlatDbHealCheckpoint.Phase resumePhase = FlatDbHealCheckpoint.Phase.ACCOUNTS;
+        List<Hash> divergentAccounts = new ArrayList<>();
+
+        if (!dryRun) {
+            Optional<FlatDbHealCheckpoint> checkpoint = readCheckpoint();
+            if (checkpoint.isPresent() && checkpoint.get().stateRoot().equals(stateRoot)) {
+                startRangeIndex = checkpoint.get().nextRangeIndex();
+                resumePhase = checkpoint.get().phase();
+                divergentAccounts.addAll(readPendingStorageAccounts());
+            } else if (checkpoint.isPresent()) {
+                LOG.info("Chain has advanced since the last interrupted run; "
+                    + "restarting heal from the beginning.");
+            }
+        }
+
+        long accountsAdded = 0;
+        long accountsUpdated = 0;
+        long accountsRemoved = 0;
+
+        if (resumePhase == FlatDbHealCheckpoint.Phase.ACCOUNTS) {
+            List<Map.Entry<Bytes32, Bytes32>> ranges =
+                new ArrayList<>(RangeManager.generateAllRanges(RANGE_COUNT).entrySet());
+            for (int i = startRangeIndex; i < ranges.size(); i++) {
+                Map.Entry<Bytes32, Bytes32> range = ranges.get(i);
+                AccountRangeOutcome outcome = healAccountRange(stateRoot, range.getKey(), range.getValue(), dryRun);
+                accountsAdded += outcome.added;
+                accountsUpdated += outcome.updated;
+                accountsRemoved += outcome.removed;
+                divergentAccounts.addAll(outcome.divergentAccounts);
+                listener.onRangeComplete(
+                    i + 1, ranges.size(), outcome.accountsChecked, outcome.added + outcome.updated + outcome.removed);
+                if (!dryRun) {
+                    persistCheckpoint(new FlatDbHealCheckpoint(stateRoot, FlatDbHealCheckpoint.Phase.ACCOUNTS, i + 1));
+                }
+            }
+            if (!dryRun) {
+                persistPendingStorageAccounts(divergentAccounts);
+                persistCheckpoint(new FlatDbHealCheckpoint(stateRoot, FlatDbHealCheckpoint.Phase.STORAGE, RANGE_COUNT));
+            }
+        }
+
+        long slotsAdded = 0;
+        long slotsUpdated = 0;
+        long slotsRemoved = 0;
+        int totalAccountsToHeal = divergentAccounts.size();
+        List<Hash> remainingAccounts = new ArrayList<>(divergentAccounts);
+        int accountsHealed = 0;
+
+        while (!remainingAccounts.isEmpty()) {
+            Hash accountHash = remainingAccounts.remove(0);
+            Optional<Bytes> accountValue = worldState.getAccount(accountHash);
+            if (accountValue.isPresent()) {
+                Hash storageRoot = PmtStateTrieAccountValue.readFrom(RLP.input(accountValue.get())).getStorageRoot();
+                StorageRangeOutcome outcome = healAccountStorage(accountHash, storageRoot, dryRun);
+                slotsAdded += outcome.added;
+                slotsUpdated += outcome.updated;
+                slotsRemoved += outcome.removed;
+                accountsHealed++;
+                listener.onStorageAccountComplete(
+                    accountsHealed, totalAccountsToHeal, outcome.slotsChecked,
+                    outcome.added + outcome.updated + outcome.removed);
+            }
+            if (!dryRun) {
+                persistPendingStorageAccounts(remainingAccounts);
+            }
+        }
+
+        if (!dryRun) {
+            clearCheckpoint();
+            worldState.upgradeToFullFlatDbMode();
+        }
+
+        return new FlatDbHealResult(
+            accountsAdded, accountsUpdated, accountsRemoved, slotsAdded, slotsUpdated, slotsRemoved, dryRun);
+    }
+
+    private Optional<FlatDbHealCheckpoint> readCheckpoint() {
+        return storage.get(KeyValueSegmentIdentifier.VARIABLES, CHECKPOINT_KEY)
+            .map(FlatDbHealCheckpoint::decode);
+    }
+
+    private List<Hash> readPendingStorageAccounts() {
+        return storage.get(KeyValueSegmentIdentifier.VARIABLES, PENDING_STORAGE_ACCOUNTS_KEY)
+            .map(FlatDbHealer::decodeAccountList)
+            .orElseGet(ArrayList::new);
+    }
+
+    private void persistCheckpoint(FlatDbHealCheckpoint checkpoint) {
+        var transaction = storage.startTransaction();
+        transaction.put(KeyValueSegmentIdentifier.VARIABLES, CHECKPOINT_KEY, checkpoint.encode());
+        transaction.commit();
+        transaction.close();
+    }
+
+    private void persistPendingStorageAccounts(List<Hash> accounts) {
+        var transaction = storage.startTransaction();
+        transaction.put(KeyValueSegmentIdentifier.VARIABLES, PENDING_STORAGE_ACCOUNTS_KEY, encodeAccountList(accounts));
+        transaction.commit();
+        transaction.close();
+    }
+
+    private void clearCheckpoint() {
+        var transaction = storage.startTransaction();
+        transaction.remove(KeyValueSegmentIdentifier.VARIABLES, CHECKPOINT_KEY);
+        transaction.remove(KeyValueSegmentIdentifier.VARIABLES, PENDING_STORAGE_ACCOUNTS_KEY);
+        transaction.commit();
+        transaction.close();
+    }
+
+    private static byte[] encodeAccountList(List<Hash> accounts) {
+        ByteBuffer buffer = ByteBuffer.allocate(accounts.size() * 32);
+        for (Hash account : accounts) {
+            buffer.put(account.toArrayUnsafe());
+        }
+        return buffer.array();
+    }
+
+    private static List<Hash> decodeAccountList(byte[] bytes) {
+        List<Hash> accounts = new ArrayList<>();
+        for (int offset = 0; offset < bytes.length; offset += 32) {
+            accounts.add(Hash.wrap(Bytes32.wrap(bytes, offset)));
+        }
+        return accounts;
     }
 
     static final class AccountRangeOutcome {
