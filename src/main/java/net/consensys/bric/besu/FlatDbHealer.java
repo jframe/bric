@@ -413,12 +413,25 @@ public class FlatDbHealer {
      * Collects up to {@code batchLimit} trie leaves in {@code [batchStart, endKeyHash]}, starting the
      * walk at {@code batchStart}. Shared by the account and storage phases, which differ only in the
      * {@code trie} being walked.
+     *
+     * <p>Constructs the {@link TrieIterator} directly with {@code unload=true} rather than using
+     * {@link RangeStorageEntriesCollector#createVisitor}, which hardcodes {@code false}. Besu's
+     * {@code StoredNode.load()} permanently caches every resolved node on the node itself, and
+     * {@code trie}'s root field is the SAME object across every batch in a range/account (that's how
+     * paging resumes correctly) — so with {@code unload=false}, every node ever visited stays
+     * resolved in memory for the entire range/account walk, growing without bound regardless of
+     * {@code batchLimit}. This is exactly what OOM'd on a mainnet-size range despite the batch cap.
+     * {@code unload=true} clears each child's cache once its subtree is fully walked, mirroring
+     * {@code StoredMerkleTrie.visitLeafs()} — Besu's own "walk every leaf" method — which already
+     * relies on this for the same reason. Trades a little redundant I/O (shallow ancestor nodes get
+     * re-read from RocksDB once per batch instead of once per range) for memory bounded by the
+     * current path depth instead of the whole range's node count.
      */
     private static NavigableMap<Bytes32, Bytes> collectTrieBatch(
             MerkleTrie<Bytes, Bytes> trie, Bytes32 batchStart, Bytes32 endKeyHash, int batchLimit) {
         RangeStorageEntriesCollector collector = RangeStorageEntriesCollector.createCollector(
             batchStart, endKeyHash, batchLimit, Integer.MAX_VALUE);
-        TrieIterator<Bytes> visitor = RangeStorageEntriesCollector.createVisitor(collector);
+        TrieIterator<Bytes> visitor = new TrieIterator<>(collector, true);
         return new TreeMap<>(trie.entriesFrom(
             root -> RangeStorageEntriesCollector.collectEntries(collector, visitor, root, batchStart)));
     }

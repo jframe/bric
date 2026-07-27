@@ -26,6 +26,7 @@ import org.rocksdb.RocksDB;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -345,6 +346,65 @@ class FlatDbHealerTest {
         assertThat(verifyWorldState.getAccount(orphanBetweenHash)).isEmpty();
         assertThat(verifyWorldState.getAccount(orphanAfterHash1)).isEmpty();
         assertThat(verifyWorldState.getAccount(orphanAfterHash2)).isEmpty();
+    }
+
+    /**
+     * Regression test for a memory leak in the batched trie walk: {@code collectTrieBatch} used to
+     * build its {@link org.hyperledger.besu.ethereum.trie.TrieIterator} via
+     * {@code RangeStorageEntriesCollector.createVisitor()}, which hardcodes {@code unload=false}.
+     * Besu's {@code StoredNode.load()} permanently caches every resolved node, and the same trie
+     * instance (and its cached root) is reused across every batch in a range — so every node ever
+     * visited stayed resolved in memory for the whole range walk, growing without bound regardless of
+     * batch size. This is what OOM'd on a mainnet-size range despite the batch cap from the earlier
+     * fix. The fix (constructing the iterator directly with {@code unload=true}, mirroring Besu's own
+     * {@code StoredMerkleTrie.visitLeafs()}) is a pure memory characteristic — not something a fast
+     * unit test can directly observe — so this test instead guards the testable invariant: many
+     * small batches spread across many different trie branches (forcing repeated unload/reload of
+     * shared ancestor nodes) must still produce results identical to a single unbatched pass.
+     */
+    @Test
+    void healAccountRange_manyBatchesAcrossSpreadOutAccountsMatchSingleBatchResult() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+
+        // Evenly spread across the full 256-bit key space (not clustered in one corner) so batching
+        // walks through many different trie branches rather than repeatedly revisiting the same
+        // shallow corner.
+        List<Map.Entry<Bytes32, Bytes32>> spreadPoints =
+            new ArrayList<>(RangeManager.generateAllRanges(40).entrySet());
+
+        Map<Hash, byte[]> accounts = new HashMap<>();
+        for (int i = 0; i < spreadPoints.size(); i++) {
+            accounts.put(Hash.wrap(spreadPoints.get(i).getKey()), accountRlp(i, Hash.EMPTY));
+        }
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, accounts);
+
+        // Half the accounts already correctly reflected in the flat table; the rest missing entirely.
+        List<Hash> hashes = new ArrayList<>(accounts.keySet());
+        int matchingCount = hashes.size() / 2;
+        for (int i = 0; i < matchingCount; i++) {
+            seedFlatAccount(fixtureWorldState, hashes.get(i), accounts.get(hashes.get(i)));
+        }
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        // Batch limit of 3 forces well over a dozen batches across ~40 accounts spread across many
+        // branches, repeatedly unloading and reloading shared ancestor nodes.
+        FlatDbHealer.AccountRangeOutcome batchedOutcome = healer.healAccountRange(
+            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, true, 3);
+        // A batch limit larger than the whole account set collects everything in a single pass.
+        FlatDbHealer.AccountRangeOutcome singleBatchOutcome = healer.healAccountRange(
+            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, true, accounts.size() + 10);
+
+        assertThat(batchedOutcome.accountsChecked).isEqualTo(accounts.size());
+        assertThat(batchedOutcome.added).isEqualTo(accounts.size() - matchingCount);
+        assertThat(batchedOutcome.updated).isEqualTo(0);
+        assertThat(batchedOutcome.removed).isEqualTo(0);
+
+        assertThat(batchedOutcome.accountsChecked).isEqualTo(singleBatchOutcome.accountsChecked);
+        assertThat(batchedOutcome.added).isEqualTo(singleBatchOutcome.added);
+        assertThat(batchedOutcome.updated).isEqualTo(singleBatchOutcome.updated);
+        assertThat(batchedOutcome.removed).isEqualTo(singleBatchOutcome.removed);
+        assertThat(batchedOutcome.divergentAccounts)
+            .containsExactlyInAnyOrderElementsOf(singleBatchOutcome.divergentAccounts);
     }
 
     @Test
