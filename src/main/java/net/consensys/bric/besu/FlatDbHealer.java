@@ -21,6 +21,7 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -31,7 +32,6 @@ import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Function;
-import java.util.function.LongConsumer;
 
 /**
  * Reconciles a Bonsai database's flat account/storage tables against the canonical
@@ -53,6 +53,7 @@ public class FlatDbHealer {
      * (~a few MB per batch) while staying large enough that batching overhead is negligible.
      */
     private static final int DEFAULT_BATCH_LIMIT = 50_000;
+    private static final long HEARTBEAT_INTERVAL_MILLIS = 60_000;
     private static final byte[] CHECKPOINT_KEY = "bricFlatDbHealCheckpoint".getBytes(StandardCharsets.UTF_8);
     private static final byte[] PENDING_STORAGE_ACCOUNTS_KEY =
         "bricFlatDbHealPendingStorageAccounts".getBytes(StandardCharsets.UTF_8);
@@ -93,9 +94,17 @@ public class FlatDbHealer {
     }
 
     public FlatDbHealResult heal(boolean dryRun, FlatDbHealProgressListener listener) {
+        return heal(dryRun, listener, new HeartbeatThrottle(HEARTBEAT_INTERVAL_MILLIS));
+    }
+
+    /**
+     * Package-private: lets tests inject a {@link HeartbeatThrottle} backed by a fake clock, so the
+     * heartbeat wiring below can be verified deterministically without waiting on real wall-clock time.
+     */
+    FlatDbHealResult heal(boolean dryRun, FlatDbHealProgressListener listener, HeartbeatThrottle heartbeat) {
         dbManager.beginOperation();
         try {
-            return doHeal(dryRun, listener);
+            return doHeal(dryRun, listener, heartbeat);
         } finally {
             // Deregister at a point where no native RocksDB call is in flight, so a shutdown hook
             // waiting on requestCancellationAndAwait() sees the operation quiesce and can free the
@@ -104,7 +113,7 @@ public class FlatDbHealer {
         }
     }
 
-    private FlatDbHealResult doHeal(boolean dryRun, FlatDbHealProgressListener listener) {
+    private FlatDbHealResult doHeal(boolean dryRun, FlatDbHealProgressListener listener, HeartbeatThrottle heartbeat) {
         Bytes32 stateRoot = getTargetStateRoot();
 
         int startRangeIndex = 0;
@@ -141,7 +150,11 @@ public class FlatDbHealer {
                 int rangeNumber = i + 1;
                 AccountRangeOutcome outcome = healAccountRange(
                     stateRoot, range.getKey(), range.getValue(), dryRun, DEFAULT_BATCH_LIMIT,
-                    scanned -> listener.onRangeProgress(rangeNumber, ranges.size(), scanned));
+                    (scanned, percent) -> {
+                        if (heartbeat.shouldFire()) {
+                            listener.onRangeHeartbeat(rangeNumber, ranges.size(), percent);
+                        }
+                    });
                 accountsAdded += outcome.added;
                 accountsUpdated += outcome.updated;
                 accountsRemoved += outcome.removed;
@@ -185,7 +198,14 @@ public class FlatDbHealer {
                 .or(() -> worldState.getAccount(accountHash));
             if (accountValue.isPresent()) {
                 Hash storageRoot = PmtStateTrieAccountValue.readFrom(RLP.input(accountValue.get())).getStorageRoot();
-                StorageRangeOutcome outcome = healAccountStorage(accountHash, storageRoot, dryRun);
+                int accountNumber = accountsHealed + 1;
+                StorageRangeOutcome outcome = healAccountStorage(
+                    accountHash, storageRoot, dryRun, DEFAULT_BATCH_LIMIT,
+                    (scanned, percent) -> {
+                        if (heartbeat.shouldFire()) {
+                            listener.onStorageHeartbeat(accountNumber, totalAccountsToHeal, percent);
+                        }
+                    });
                 slotsAdded += outcome.added;
                 slotsUpdated += outcome.updated;
                 slotsRemoved += outcome.removed;
@@ -300,12 +320,12 @@ public class FlatDbHealer {
      */
     AccountRangeOutcome healAccountRange(
             Bytes32 stateRoot, Bytes32 startKeyHash, Bytes32 endKeyHash, boolean dryRun, int batchLimit) {
-        return healAccountRange(stateRoot, startKeyHash, endKeyHash, dryRun, batchLimit, scanned -> {});
+        return healAccountRange(stateRoot, startKeyHash, endKeyHash, dryRun, batchLimit, (scanned, percent) -> {});
     }
 
     AccountRangeOutcome healAccountRange(
             Bytes32 stateRoot, Bytes32 startKeyHash, Bytes32 endKeyHash, boolean dryRun, int batchLimit,
-            LongConsumer onBatchScanned) {
+            BatchProgressListener onBatch) {
         MerkleTrie<Bytes, Bytes> accountTrie = new StoredMerklePatriciaTrie<>(
             worldState::getAccountStateTrieNode, stateRoot, Function.identity(), Function.identity());
 
@@ -377,12 +397,11 @@ public class FlatDbHealer {
             updated += toUpdate.size();
             removed += toRemove.size();
 
+            onBatch.onBatch(accountsChecked, percentOfKeyspace(trieBatch.lastKey()));
+
             if (lastBatch) {
                 break;
             }
-            // Report the running in-range total after each non-final batch so a range spanning many
-            // batches shows incremental progress; the final batch's total is left to onRangeComplete.
-            onBatchScanned.accept(accountsChecked);
             batchStart = nextKey(trieBatch.lastKey());
         }
 
@@ -407,6 +426,21 @@ public class FlatDbHealer {
     /** The next 32-byte key after {@code key} (i.e. {@code key + 1}), used to resume a paged walk. */
     private static Bytes32 nextKey(Bytes32 key) {
         return UInt256.fromBytes(key).add(UInt256.ONE).toBytes();
+    }
+
+    private static final BigInteger KEYSPACE_SIZE = BigInteger.ONE.shiftLeft(256);
+
+    /**
+     * How far {@code key} falls into the full 256-bit key space, as a percentage (0-100). Account
+     * and storage-slot hashes are ~uniformly distributed over this space, so this doubles as an
+     * estimate of "how much of the range/account has been scanned so far" — the same technique
+     * Besu's own snap-sync progress reporting uses.
+     */
+    private static double percentOfKeyspace(Bytes32 key) {
+        // doubleValue() rounds each BigInteger to the nearest representable double (~15-16
+        // significant decimal digits of relative precision) — far more precise than a percentage
+        // display needs, so plain double division is simpler and safe here.
+        return key.toUnsignedBigInteger().doubleValue() / KEYSPACE_SIZE.doubleValue() * 100.0;
     }
 
     /**
@@ -454,6 +488,11 @@ public class FlatDbHealer {
      * account phase.
      */
     StorageRangeOutcome healAccountStorage(Hash accountHash, Hash storageRoot, boolean dryRun, int batchLimit) {
+        return healAccountStorage(accountHash, storageRoot, dryRun, batchLimit, (scanned, percent) -> {});
+    }
+
+    StorageRangeOutcome healAccountStorage(
+            Hash accountHash, Hash storageRoot, boolean dryRun, int batchLimit, BatchProgressListener onBatch) {
         MerkleTrie<Bytes, Bytes> storageTrie = new StoredMerklePatriciaTrie<>(
             (location, hash) -> worldState.getAccountStorageTrieNode(accountHash, location, hash),
             storageRoot, Function.identity(), Function.identity());
@@ -513,6 +552,8 @@ public class FlatDbHealer {
             added += toAdd.size();
             updated += toUpdate.size();
             removed += toRemove.size();
+
+            onBatch.onBatch(slotsChecked, percentOfKeyspace(trieSlots.lastKey()));
 
             if (lastBatch) {
                 break;

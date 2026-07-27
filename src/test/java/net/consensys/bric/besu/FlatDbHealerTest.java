@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -347,25 +348,60 @@ class FlatDbHealerTest {
     }
 
     @Test
-    void healAccountRange_reportsIncrementalBatchProgressForMultiBatchRange() throws Exception {
+    void healAccountRange_reportsPercentOfKeyspaceScannedPerBatch() throws Exception {
         BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
-        Hash h10 = Hash.wrap(Bytes32.leftPad(Bytes.of(10)));
-        Hash h20 = Hash.wrap(Bytes32.leftPad(Bytes.of(20)));
-        Hash h30 = Hash.wrap(Bytes32.leftPad(Bytes.of(30)));
-        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(
-            h10, accountRlp(10, Hash.EMPTY),
-            h20, accountRlp(20, Hash.EMPTY),
-            h30, accountRlp(30, Hash.EMPTY)));
 
-        List<Long> progress = new ArrayList<>();
+        // Boundaries of RangeManager's own even 4-way split give exact, easily-asserted fractions
+        // of the full 256-bit key space (25%, 50%, 75%) rather than inventing ad hoc math.
+        List<Map.Entry<Bytes32, Bytes32>> quarterBoundaries =
+            new ArrayList<>(RangeManager.generateAllRanges(4).entrySet());
+        Hash accountAt25Percent = Hash.wrap(quarterBoundaries.get(1).getKey());
+        Hash accountAt50Percent = Hash.wrap(quarterBoundaries.get(2).getKey());
+        Hash accountAt75Percent = Hash.wrap(quarterBoundaries.get(3).getKey());
+
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(
+            accountAt25Percent, accountRlp(1, Hash.EMPTY),
+            accountAt50Percent, accountRlp(2, Hash.EMPTY),
+            accountAt75Percent, accountRlp(3, Hash.EMPTY)));
+
+        List<Double> reportedPercentages = new ArrayList<>();
         FlatDbHealer healer = new FlatDbHealer(dbManager);
         healer.healAccountRange(
-            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, true, 2, progress::add);
+            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, true, 2,
+            (scanned, percent) -> reportedPercentages.add(percent));
 
-        // Batch limit 2 over 3 leaves = two batches. Only the first (non-final) batch reports
-        // incremental progress, carrying the running in-range scanned count (2). The final batch's
-        // total is left to onRangeComplete, so it must NOT also fire a progress event.
-        assertThat(progress).containsExactly(2L);
+        // Batch limit 2 over 3 leaves = two batches (2 then 1); the callback fires once per batch,
+        // including the final one, reporting the fraction of the full key space scanned so far —
+        // i.e. the position of the last leaf reached in each batch (50%, then 75%).
+        assertThat(reportedPercentages).hasSize(2);
+        assertThat(reportedPercentages.get(0)).isCloseTo(50.0, org.assertj.core.data.Offset.offset(0.01));
+        assertThat(reportedPercentages.get(1)).isCloseTo(75.0, org.assertj.core.data.Offset.offset(0.01));
+    }
+
+    @Test
+    void healAccountStorage_reportsPercentOfKeyspaceScannedPerBatch() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+
+        List<Map.Entry<Bytes32, Bytes32>> quarterBoundaries =
+            new ArrayList<>(RangeManager.generateAllRanges(4).entrySet());
+        Hash slotAt25Percent = Hash.wrap(quarterBoundaries.get(1).getKey());
+        Hash slotAt50Percent = Hash.wrap(quarterBoundaries.get(2).getKey());
+        Hash slotAt75Percent = Hash.wrap(quarterBoundaries.get(3).getKey());
+
+        Hash storageRoot = seedStorageTrie(fixtureWorldState, accountHash, Map.of(
+            slotAt25Percent, Bytes.of(1),
+            slotAt50Percent, Bytes.of(2),
+            slotAt75Percent, Bytes.of(3)));
+
+        List<Double> reportedPercentages = new ArrayList<>();
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        healer.healAccountStorage(
+            accountHash, storageRoot, true, 2, (scanned, percent) -> reportedPercentages.add(percent));
+
+        assertThat(reportedPercentages).hasSize(2);
+        assertThat(reportedPercentages.get(0)).isCloseTo(50.0, org.assertj.core.data.Offset.offset(0.01));
+        assertThat(reportedPercentages.get(1)).isCloseTo(75.0, org.assertj.core.data.Offset.offset(0.01));
     }
 
     @Test
@@ -550,6 +586,61 @@ class FlatDbHealerTest {
             .get(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE, "flatDbStatus".getBytes());
         assertThat(flatDbMode).isPresent();
         assertThat(flatDbMode.get()[0]).isEqualTo((byte) 0x01); // FULL, per FlatDbMode encoding
+    }
+
+    /**
+     * Verifies heal() actually wires a HeartbeatThrottle through to the listener's heartbeat
+     * callbacks, not just that FlatDbHealer can compute a percentage in isolation (already covered
+     * by the *_reportsPercentOfKeyspaceScannedPerBatch tests above). An always-fire throttle
+     * (interval 0, a fake clock that advances on every read) makes every batch's heartbeat reach
+     * the listener deterministically, with no dependency on real wall-clock time.
+     */
+    @Test
+    void heal_wiresHeartbeatThrottleToRangeAndStorageListenerCallbacks() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        Hash missingSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(20)));
+        Hash storageRoot = seedStorageTrie(fixtureWorldState, accountHash, Map.of(missingSlot, Bytes.of(7)));
+        byte[] accountRlp = accountRlp(1, storageRoot);
+        seedAccountTrie(fixtureWorldState, Map.of(accountHash, accountRlp));
+
+        AtomicLong clock = new AtomicLong(0);
+        HeartbeatThrottle alwaysFire = new HeartbeatThrottle(0, clock::incrementAndGet);
+
+        List<Integer> rangeHeartbeats = new ArrayList<>();
+        List<Integer> storageHeartbeats = new ArrayList<>();
+        FlatDbHealProgressListener listener = new FlatDbHealProgressListener() {
+            @Override
+            public void onRangeComplete(int rangeIndex, int totalRanges, long accountsChecked, long accountsFixed) {
+            }
+
+            @Override
+            public void onStorageAccountComplete(
+                    int accountsHealed, int totalAccountsToHeal, long slotsChecked, long slotsFixed) {
+            }
+
+            @Override
+            public void onRangeHeartbeat(int rangeIndex, int totalRanges, double percentComplete) {
+                rangeHeartbeats.add(rangeIndex);
+                assertThat(percentComplete).isBetween(0.0, 100.0);
+            }
+
+            @Override
+            public void onStorageHeartbeat(int accountsHealed, int totalAccountsToHeal, double percentComplete) {
+                storageHeartbeats.add(accountsHealed);
+                assertThat(percentComplete).isBetween(0.0, 100.0);
+            }
+        };
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        healer.heal(true, listener, alwaysFire);
+
+        // Exactly one of the 16 account ranges contains accountHash and produces a single
+        // (non-empty) batch; the other 15 are empty and never invoke the batch callback at all.
+        // Same for the storage phase: one divergent account, one batch of its storage trie.
+        assertThat(rangeHeartbeats).hasSize(1);
+        assertThat(storageHeartbeats).containsExactly(1);
     }
 
     @Test

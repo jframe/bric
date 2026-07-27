@@ -5,6 +5,8 @@ import net.consensys.bric.besu.FlatDbHealProgressListener;
 import net.consensys.bric.besu.FlatDbHealResult;
 import net.consensys.bric.besu.FlatDbHealer;
 import net.consensys.bric.db.BesuDatabaseManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -16,6 +18,8 @@ import java.util.Arrays;
  * docs/superpowers/specs/2026-07-24-flatdb-heal-design.md for the algorithm.
  */
 public class DbUpgradeFlatDbCommand implements Command {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DbUpgradeFlatDbCommand.class);
 
     private final BesuDatabaseManager dbManager;
 
@@ -87,21 +91,29 @@ public class DbUpgradeFlatDbCommand implements Command {
     private static final class PrintingProgressListener implements FlatDbHealProgressListener {
         @Override
         public void onRangeComplete(int rangeIndex, int totalRanges, long accountsChecked, long accountsFixed) {
-            System.out.println("Range " + rangeIndex + "/" + totalRanges + " - " + accountsChecked
-                + " accounts checked, " + accountsFixed + " fixed");
+            System.out.printf("Range %d/%d - %d accounts checked, %d fixed (%.1f%% of account phase complete)%n",
+                rangeIndex, totalRanges, accountsChecked, accountsFixed, rangeIndex * 100.0 / totalRanges);
         }
 
         @Override
-        public void onRangeProgress(int rangeIndex, int totalRanges, long accountsScannedInRange) {
-            System.out.println("Range " + rangeIndex + "/" + totalRanges + " - "
-                + accountsScannedInRange + " accounts scanned...");
+        public void onRangeHeartbeat(int rangeIndex, int totalRanges, double percentComplete) {
+            LOG.info("Range {}/{} - still running ({}% of account phase complete)",
+                rangeIndex, totalRanges, String.format("%.1f", percentComplete));
         }
 
         @Override
         public void onStorageAccountComplete(
                 int accountsHealed, int totalAccountsToHeal, long slotsChecked, long slotsFixed) {
-            System.out.println("Storage " + accountsHealed + "/" + totalAccountsToHeal + " accounts - "
-                + slotsChecked + " slots checked, " + slotsFixed + " fixed");
+            System.out.printf(
+                "Storage %d/%d accounts - %d slots checked, %d fixed (%.1f%% of storage phase complete)%n",
+                accountsHealed, totalAccountsToHeal, slotsChecked, slotsFixed,
+                accountsHealed * 100.0 / totalAccountsToHeal);
+        }
+
+        @Override
+        public void onStorageHeartbeat(int accountsHealed, int totalAccountsToHeal, double percentComplete) {
+            LOG.info("Storage {}/{} accounts - still running ({}% of this account's storage scanned)",
+                accountsHealed, totalAccountsToHeal, String.format("%.1f", percentComplete));
         }
     }
 
