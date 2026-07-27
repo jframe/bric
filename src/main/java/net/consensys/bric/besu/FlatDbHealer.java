@@ -51,8 +51,12 @@ public class FlatDbHealer {
 
     public FlatDbHealer(BesuDatabaseManager dbManager) {
         this.storage = new RocksDBSegmentedStorage(dbManager);
+        DataStorageConfiguration dataStorageConfiguration =
+            dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE
+                ? DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG
+                : DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
         BonsaiFlatDbStrategyProvider flatDbStrategyProvider = new BonsaiFlatDbStrategyProvider(
-            new NoOpMetricsSystem(), DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+            new NoOpMetricsSystem(), dataStorageConfiguration);
         try {
             flatDbStrategyProvider.loadFlatDbStrategy(storage);
         } catch (UnsupportedOperationException e) {

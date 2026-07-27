@@ -104,6 +104,70 @@ class FlatDbHealerTest {
     }
 
     /**
+     * Same column families as createFixtureDatabaseSchema(), plus ACCOUNT_INFO_STATE_ARCHIVE —
+     * enough for BesuDatabaseManager.detectDatabaseFormat() to classify this as BONSAI_ARCHIVE.
+     * Opens the database writable and returns a BonsaiWorldStateKeyValueStorage built the same
+     * way FlatDbHealer builds its own, for seeding fixture data.
+     */
+    private BonsaiWorldStateKeyValueStorage openWritableArchiveFixtureDatabase() throws Exception {
+        List<ColumnFamilyDescriptor> descriptors = List.of(
+            new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY),
+            new ColumnFamilyDescriptor(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getId()),
+            new ColumnFamilyDescriptor(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getId()),
+            new ColumnFamilyDescriptor(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE.getId()),
+            new ColumnFamilyDescriptor(KeyValueSegmentIdentifier.CODE_STORAGE.getId()),
+            new ColumnFamilyDescriptor(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE.getId()),
+            new ColumnFamilyDescriptor(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE.getId()),
+            new ColumnFamilyDescriptor(KeyValueSegmentIdentifier.VARIABLES.getId()));
+        List<ColumnFamilyHandle> handles = new ArrayList<>();
+        DBOptions options = new DBOptions()
+            .setCreateIfMissing(true)
+            .setCreateMissingColumnFamilies(true);
+        try (RocksDB db = RocksDB.open(options, tempDir.toString(), descriptors, handles)) {
+            for (ColumnFamilyHandle handle : handles) {
+                handle.close();
+            }
+        }
+
+        dbManager.openDatabase(tempDir.toString(), true);
+        return buildWorldState(dbManager);
+    }
+
+    @Test
+    void constructor_healsArchiveDatabaseAndLeavesArchiveTableUntouched() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableArchiveFixtureDatabase();
+        assertThat(dbManager.getFormat()).isEqualTo(BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE);
+
+        Hash missingHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        byte[] missingRlp = accountRlp(1, Hash.EMPTY_TRIE_HASH);
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(missingHash, missingRlp));
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealResult result = healer.heal(false, FlatDbHealProgressListener.NO_OP);
+
+        assertThat(result.accountsAdded).isEqualTo(1);
+
+        // Current-state table got the fix, exactly like a plain Bonsai database.
+        BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
+        assertThat(verifyWorldState.getAccount(missingHash)).contains(Bytes.wrap(missingRlp));
+
+        // The archive-specific table is never touched: still completely empty.
+        RocksDBSegmentedStorage verifyStorage = new RocksDBSegmentedStorage(dbManager);
+        List<org.apache.commons.lang3.tuple.Pair<byte[], byte[]>> archiveEntries = verifyStorage.streamFromKey(
+            KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE,
+            RangeManager.MIN_RANGE.toArrayUnsafe(), RangeManager.MAX_RANGE.toArrayUnsafe()).toList();
+        assertThat(archiveEntries).isEmpty();
+
+        // The persisted flat DB mode is ARCHIVE (0x02), not FULL (0x01) — this is the one
+        // behavior that's actually format-conditional in Besu's own upgradeToFullFlatDbMode().
+        net.consensys.bric.db.SegmentReader segmentReader = new net.consensys.bric.db.SegmentReader(dbManager);
+        Optional<byte[]> flatDbMode = segmentReader.get(
+            KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE, "flatDbStatus".getBytes());
+        assertThat(flatDbMode).isPresent();
+        assertThat(flatDbMode.get()[0]).isEqualTo((byte) 0x02);
+    }
+
+    /**
      * Regression test for the bug where FlatDbHealer's constructor could never succeed
      * against a read-only-opened database: Besu's BonsaiFlatDbStrategyProvider.loadFlatDbStrategy()
      * always attempts a metadata write-back on first load (its in-memory flatDbMode field starts
