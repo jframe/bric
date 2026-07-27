@@ -731,6 +731,43 @@ class FlatDbHealerTest {
     }
 
     @Test
+    void heal_stopsPromptlyAndThrowsWhenCancellationRequested() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+
+        // An account whose hash is the start of a late range, so heal only reaches it well after
+        // range 0 — i.e. after the cancellation below has already been signalled.
+        List<Map.Entry<Bytes32, Bytes32>> ranges =
+            new ArrayList<>(RangeManager.generateAllRanges(16).entrySet());
+        Hash lateAccount = Hash.wrap(ranges.get(8).getKey());
+        byte[] lateRlp = accountRlp(1, Hash.EMPTY_TRIE_HASH);
+        seedAccountTrie(fixtureWorldState, Map.of(lateAccount, lateRlp));
+
+        // Mimic the shutdown hook asking the heal to stop, as soon as the first range completes.
+        FlatDbHealProgressListener cancelAfterFirstRange = new FlatDbHealProgressListener() {
+            @Override
+            public void onRangeComplete(int rangeIndex, int totalRanges, long accountsChecked, long accountsFixed) {
+                dbManager.requestCancellation();
+            }
+
+            @Override
+            public void onStorageAccountComplete(
+                    int accountsHealed, int totalAccountsToHeal, long slotsChecked, long slotsFixed) {
+            }
+        };
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        assertThatThrownBy(() -> healer.heal(false, cancelAfterFirstRange))
+            .isInstanceOf(FlatDbHealCancelledException.class);
+
+        // The late-range account was never reached, so its flat entry stays unhealed...
+        BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
+        assertThat(verifyWorldState.getAccount(lateAccount)).isEmpty();
+        // ...and heal deregistered the operation on its way out, so the shutdown hook's
+        // quiesce-wait won't block forever.
+        assertThat(dbManager.isOperationInProgress()).isFalse();
+    }
+
+    @Test
     void heal_discardsStaleCheckpointWhenStateRootHasMoved() throws Exception {
         BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
         Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));

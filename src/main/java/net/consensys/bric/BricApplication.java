@@ -90,10 +90,23 @@ public class BricApplication implements Callable<Integer> {
                         LOG.info("Cancelling running compaction jobs...");
                         processor.getDbManager().getCompactionJobManager().cancelAll();
                     }
-                    // Force close: even if cancelAll timed out and a worker is
-                    // still RUNNING, we're tearing down the JVM and want native
-                    // handles released cleanly.
-                    processor.getDbManager().closeDatabaseForce();
+                    // A long-running operation (e.g. flat DB heal) runs on the main thread issuing
+                    // native RocksDB reads. Freeing the column-family handles here while such a read
+                    // is in flight segfaults the JVM, so ask the operation to stop and wait for it to
+                    // quiesce first. If it doesn't stop in time, skip the native close entirely: the
+                    // JVM is exiting anyway, so the OS reclaims everything, and read-only/committed
+                    // state is already durable — an unclean close beats a native crash.
+                    boolean safeToClose = true;
+                    if (processor.getDbManager().isOperationInProgress()) {
+                        LOG.info("Waiting for in-progress operation to stop before closing...");
+                        safeToClose = processor.getDbManager().requestCancellationAndAwait(2000);
+                    }
+                    if (safeToClose) {
+                        processor.getDbManager().closeDatabaseForce();
+                    } else {
+                        LOG.warn("In-progress operation did not stop within timeout; skipping "
+                            + "database close (JVM is exiting, so the OS reclaims native resources).");
+                    }
                 }
             } catch (Exception e) {
                 LOG.error("Error closing database on shutdown", e);

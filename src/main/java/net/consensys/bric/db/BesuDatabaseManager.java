@@ -30,6 +30,15 @@ public class BesuDatabaseManager {
     private boolean writable = false;
     private CompactionJobManager jobManager;
 
+    // Coordination between long-running, cancellable operations (e.g. flat DB heal, which runs on
+    // the main thread issuing native RocksDB reads) and the JVM shutdown hook. Without it, Ctrl-C
+    // would run the hook's closeDatabaseForce() — freeing the column-family handles — concurrently
+    // with an in-flight native read still dereferencing them, segfaulting the JVM. The hook instead
+    // asks the operation to stop and waits for it to quiesce before freeing anything.
+    private final java.util.concurrent.atomic.AtomicBoolean operationInProgress =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private volatile boolean cancellationRequested = false;
+
     public enum DatabaseFormat {
         BONSAI,
         BONSAI_ARCHIVE,
@@ -197,6 +206,60 @@ public class BesuDatabaseManager {
             return;
         }
         doClose();
+    }
+
+    /**
+     * Registers the start of a long-running, cancellable operation (e.g. flat DB heal) on the
+     * calling thread and clears any stale cancellation request. The operation must poll
+     * {@link #isCancellationRequested()} at safe points (between batches, when no native RocksDB
+     * call is in flight) and call {@link #endOperation()} in a finally block on the way out.
+     */
+    public void beginOperation() {
+        cancellationRequested = false;
+        operationInProgress.set(true);
+    }
+
+    /** Marks the current operation finished; safe to call even if none was registered. */
+    public void endOperation() {
+        operationInProgress.set(false);
+    }
+
+    /** Whether a {@link #beginOperation()} is currently active. */
+    public boolean isOperationInProgress() {
+        return operationInProgress.get();
+    }
+
+    /** Whether a caller has asked the in-progress operation to stop at its next safe point. */
+    public boolean isCancellationRequested() {
+        return cancellationRequested;
+    }
+
+    /** Requests cancellation without waiting; the operation stops at its next safe point. */
+    public void requestCancellation() {
+        cancellationRequested = true;
+    }
+
+    /**
+     * Requests cancellation, then waits up to {@code timeoutMillis} for the in-progress operation to
+     * reach a safe point and deregister. Returns {@code true} if no operation is in progress when it
+     * returns (safe to free native handles), {@code false} if it timed out with one still running
+     * (the caller must NOT close the database — freeing handles mid-native-call segfaults the JVM).
+     */
+    public boolean requestCancellationAndAwait(long timeoutMillis) {
+        cancellationRequested = true;
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (operationInProgress.get()) {
+            if (System.currentTimeMillis() >= deadline) {
+                return false;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return !operationInProgress.get();
+            }
+        }
+        return true;
     }
 
     private void doClose() {

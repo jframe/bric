@@ -59,8 +59,10 @@ public class FlatDbHealer {
 
     private final RocksDBSegmentedStorage storage;
     private final BonsaiWorldStateKeyValueStorage worldState;
+    private final BesuDatabaseManager dbManager;
 
     public FlatDbHealer(BesuDatabaseManager dbManager) {
+        this.dbManager = dbManager;
         this.storage = new RocksDBSegmentedStorage(dbManager);
         DataStorageConfiguration dataStorageConfiguration =
             dbManager.getFormat() == BesuDatabaseManager.DatabaseFormat.BONSAI_ARCHIVE
@@ -91,6 +93,18 @@ public class FlatDbHealer {
     }
 
     public FlatDbHealResult heal(boolean dryRun, FlatDbHealProgressListener listener) {
+        dbManager.beginOperation();
+        try {
+            return doHeal(dryRun, listener);
+        } finally {
+            // Deregister at a point where no native RocksDB call is in flight, so a shutdown hook
+            // waiting on requestCancellationAndAwait() sees the operation quiesce and can free the
+            // native handles safely (or, on a clean completion, close normally).
+            dbManager.endOperation();
+        }
+    }
+
+    private FlatDbHealResult doHeal(boolean dryRun, FlatDbHealProgressListener listener) {
         Bytes32 stateRoot = getTargetStateRoot();
 
         int startRangeIndex = 0;
@@ -122,6 +136,7 @@ public class FlatDbHealer {
             List<Map.Entry<Bytes32, Bytes32>> ranges =
                 new ArrayList<>(RangeManager.generateAllRanges(RANGE_COUNT).entrySet());
             for (int i = startRangeIndex; i < ranges.size(); i++) {
+                checkNotCancelled();
                 Map.Entry<Bytes32, Bytes32> range = ranges.get(i);
                 int rangeNumber = i + 1;
                 AccountRangeOutcome outcome = healAccountRange(
@@ -157,6 +172,7 @@ public class FlatDbHealer {
         int accountsHealed = 0;
 
         while (!remainingAccounts.isEmpty()) {
+            checkNotCancelled();
             Hash accountHash = remainingAccounts.remove(0);
             // Prefer the trie-derived value already computed by this invocation's account phase
             // (correct even for "updated" accounts, whose flat entry may still be stale at this
@@ -302,6 +318,7 @@ public class FlatDbHealer {
 
         Bytes32 batchStart = startKeyHash;
         while (true) {
+            checkNotCancelled();
             NavigableMap<Bytes32, Bytes> trieBatch = collectTrieBatch(
                 accountTrie, batchStart, endKeyHash, batchLimit);
             if (trieBatch.isEmpty()) {
@@ -392,6 +409,17 @@ public class FlatDbHealer {
         return UInt256.fromBytes(key).add(UInt256.ONE).toBytes();
     }
 
+    /**
+     * Aborts the heal if cancellation has been requested. Called only at safe points — between
+     * ranges, between storage accounts, and between batches — where no native RocksDB call is in
+     * flight, so the operation can deregister cleanly and let a shutdown hook free handles safely.
+     */
+    private void checkNotCancelled() {
+        if (dbManager.isCancellationRequested()) {
+            throw new FlatDbHealCancelledException();
+        }
+    }
+
     private NavigableMap<Bytes32, Bytes> readFlatRange(
             KeyValueSegmentIdentifier segment, byte[] startKey, byte[] endKey) {
         NavigableMap<Bytes32, Bytes> result = new TreeMap<>();
@@ -437,6 +465,7 @@ public class FlatDbHealer {
 
         Bytes32 batchStart = RangeManager.MIN_RANGE;
         while (true) {
+            checkNotCancelled();
             NavigableMap<Bytes32, Bytes> trieSlots = collectTrieBatch(
                 storageTrie, batchStart, RangeManager.MAX_RANGE, batchLimit);
             if (trieSlots.isEmpty()) {

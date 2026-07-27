@@ -1,5 +1,6 @@
 package net.consensys.bric.commands;
 
+import net.consensys.bric.besu.FlatDbHealCancelledException;
 import net.consensys.bric.besu.FlatDbHealProgressListener;
 import net.consensys.bric.besu.FlatDbHealResult;
 import net.consensys.bric.besu.FlatDbHealer;
@@ -61,6 +62,10 @@ public class DbUpgradeFlatDbCommand implements Command {
         FlatDbHealResult result;
         try {
             result = healer.heal(dryRun, new PrintingProgressListener());
+        } catch (FlatDbHealCancelledException e) {
+            System.out.println("Cancelled - no incomplete state was left behind"
+                + (dryRun ? "." : "; re-run to resume from the last checkpoint."));
+            return;
         } catch (RuntimeException e) {
             System.err.println("Error: " + e.getMessage());
             return;
