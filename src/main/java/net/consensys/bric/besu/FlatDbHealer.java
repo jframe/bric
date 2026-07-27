@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 /**
@@ -140,6 +141,7 @@ public class FlatDbHealer {
         long accountsAdded = 0;
         long accountsUpdated = 0;
         long accountsRemoved = 0;
+        long accountsWithMissingCode = 0;
 
         if (resumePhase == FlatDbHealCheckpoint.Phase.ACCOUNTS) {
             List<Map.Entry<Bytes32, Bytes32>> ranges =
@@ -154,10 +156,12 @@ public class FlatDbHealer {
                         if (heartbeat.shouldFire()) {
                             listener.onRangeHeartbeat(rangeNumber, ranges.size(), percent);
                         }
-                    });
+                    },
+                    listener::onMissingCode);
                 accountsAdded += outcome.added;
                 accountsUpdated += outcome.updated;
                 accountsRemoved += outcome.removed;
+                accountsWithMissingCode += outcome.accountsWithMissingCode;
                 divergentAccounts.addAll(outcome.divergentAccounts);
                 divergentAccountValues.putAll(outcome.divergentAccountValues);
                 listener.onRangeComplete(
@@ -225,7 +229,8 @@ public class FlatDbHealer {
         }
 
         return new FlatDbHealResult(
-            accountsAdded, accountsUpdated, accountsRemoved, slotsAdded, slotsUpdated, slotsRemoved, dryRun);
+            accountsAdded, accountsUpdated, accountsRemoved, slotsAdded, slotsUpdated, slotsRemoved,
+            accountsWithMissingCode, dryRun);
     }
 
     private Optional<FlatDbHealCheckpoint> readCheckpoint() {
@@ -282,6 +287,7 @@ public class FlatDbHealer {
         final long added;
         final long updated;
         final long removed;
+        final long accountsWithMissingCode;
         final List<Hash> divergentAccounts;
         /**
          * Trie-derived RLP value for every account in {@link #divergentAccounts} (both added and
@@ -292,12 +298,13 @@ public class FlatDbHealer {
         final Map<Hash, Bytes> divergentAccountValues;
 
         AccountRangeOutcome(
-                long accountsChecked, long added, long updated, long removed,
+                long accountsChecked, long added, long updated, long removed, long accountsWithMissingCode,
                 List<Hash> divergentAccounts, Map<Hash, Bytes> divergentAccountValues) {
             this.accountsChecked = accountsChecked;
             this.added = added;
             this.updated = updated;
             this.removed = removed;
+            this.accountsWithMissingCode = accountsWithMissingCode;
             this.divergentAccounts = divergentAccounts;
             this.divergentAccountValues = divergentAccountValues;
         }
@@ -326,6 +333,23 @@ public class FlatDbHealer {
     AccountRangeOutcome healAccountRange(
             Bytes32 stateRoot, Bytes32 startKeyHash, Bytes32 endKeyHash, boolean dryRun, int batchLimit,
             BatchProgressListener onBatch) {
+        return healAccountRange(
+            stateRoot, startKeyHash, endKeyHash, dryRun, batchLimit, onBatch, (accountHash, codeHash) -> {});
+    }
+
+    /**
+     * As above, plus {@code onMissingCode} — fired for every account in the range whose codeHash
+     * (read from the trie, not the flat table) is non-empty but has no matching entry in
+     * {@code CODE_STORAGE}. Checked for every account, not just ones the add/update/remove diff
+     * flags: an account's top-level record can be perfectly consistent while its code entry is
+     * silently missing, since the account trie only stores the codeHash, never the bytecode itself
+     * — the diff above has no way to see that gap. Unlike accounts/storage, missing code can't be
+     * healed locally (no trie-derivable source of truth for arbitrary bytecode bytes; Besu's own
+     * snap-sync recovers it from a peer), so this is detection-only.
+     */
+    AccountRangeOutcome healAccountRange(
+            Bytes32 stateRoot, Bytes32 startKeyHash, Bytes32 endKeyHash, boolean dryRun, int batchLimit,
+            BatchProgressListener onBatch, BiConsumer<Hash, Hash> onMissingCode) {
         MerkleTrie<Bytes, Bytes> accountTrie = new StoredMerklePatriciaTrie<>(
             worldState::getAccountStateTrieNode, stateRoot, Function.identity(), Function.identity());
 
@@ -333,6 +357,7 @@ public class FlatDbHealer {
         long added = 0;
         long updated = 0;
         long removed = 0;
+        long accountsWithMissingCode = 0;
         List<Hash> divergentAccounts = new ArrayList<>();
         Map<Hash, Bytes> divergentAccountValues = new HashMap<>();
 
@@ -392,6 +417,15 @@ public class FlatDbHealer {
                 divergentAccountValues.put(Hash.wrap(hash), trieBatch.get(hash));
             });
 
+            for (Map.Entry<Bytes32, Bytes> entry : trieBatch.entrySet()) {
+                Hash codeHash = PmtStateTrieAccountValue.readFrom(RLP.input(entry.getValue())).getCodeHash();
+                if (!codeHash.equals(Hash.EMPTY)
+                        && storage.get(KeyValueSegmentIdentifier.CODE_STORAGE, codeHash.toArrayUnsafe()).isEmpty()) {
+                    accountsWithMissingCode++;
+                    onMissingCode.accept(Hash.wrap(entry.getKey()), codeHash);
+                }
+            }
+
             accountsChecked += trieBatch.size();
             added += toAdd.size();
             updated += toUpdate.size();
@@ -406,7 +440,8 @@ public class FlatDbHealer {
         }
 
         return new AccountRangeOutcome(
-            accountsChecked, added, updated, removed, divergentAccounts, divergentAccountValues);
+            accountsChecked, added, updated, removed, accountsWithMissingCode,
+            divergentAccounts, divergentAccountValues);
     }
 
     /**

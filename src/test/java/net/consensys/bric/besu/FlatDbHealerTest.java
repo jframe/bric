@@ -36,6 +36,7 @@ import java.util.function.Function;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
 
 class FlatDbHealerTest {
 
@@ -221,8 +222,12 @@ class FlatDbHealerTest {
     }
 
     private static byte[] accountRlp(long nonce, Hash storageRoot) {
+        return accountRlp(nonce, storageRoot, Hash.EMPTY);
+    }
+
+    private static byte[] accountRlp(long nonce, Hash storageRoot, Hash codeHash) {
         return new BonsaiAccount(
-                null, Address.ZERO, Hash.ZERO, nonce, Wei.ZERO, storageRoot, Hash.EMPTY, false, null)
+                null, Address.ZERO, Hash.ZERO, nonce, Wei.ZERO, storageRoot, codeHash, false, null)
             .serializeAccount().toArrayUnsafe();
     }
 
@@ -540,6 +545,89 @@ class FlatDbHealerTest {
 
         BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
         assertThat(verifyWorldState.getAccount(missingHash)).isEmpty();
+    }
+
+    /**
+     * Regression coverage for the gap that broke a live Besu archive migration:
+     * bric's account/storage diff can report an account as fully healthy while its CODE_STORAGE
+     * entry is silently missing, since the account trie only stores a codeHash — never the
+     * bytecode itself — so this drift is invisible to the add/update/remove comparison. Unlike
+     * accounts/storage, a missing code entry can't be re-derived locally (no trie-stored source of
+     * truth for arbitrary bytecode), so this is detection-only: it reports the gap without
+     * attempting to fix it.
+     */
+    @Test
+    void healAccountRange_reportsMissingCodeForNonDivergentAccountWithAbsentCodeHash() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        Hash codeHash = Hash.wrap(Bytes32.leftPad(Bytes.of(0x77)));
+        byte[] rlp = accountRlp(1, Hash.EMPTY, codeHash);
+
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(accountHash, rlp));
+        // Flat entry matches the trie exactly: the account itself is NOT divergent. CODE_STORAGE is
+        // deliberately left empty for codeHash -- this is the exact scenario the account/storage
+        // diff alone cannot see.
+        seedFlatAccount(fixtureWorldState, accountHash, rlp);
+
+        List<Hash> missingCodeAccountHashes = new ArrayList<>();
+        List<Hash> missingCodeHashes = new ArrayList<>();
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealer.AccountRangeOutcome outcome = healer.healAccountRange(
+            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, true, 50_000, (scanned, percent) -> {},
+            (foundAccountHash, foundCodeHash) -> {
+                missingCodeAccountHashes.add(foundAccountHash);
+                missingCodeHashes.add(foundCodeHash);
+            });
+
+        assertThat(outcome.added).isZero();
+        assertThat(outcome.updated).isZero();
+        assertThat(outcome.removed).isZero();
+        assertThat(outcome.accountsWithMissingCode).isEqualTo(1);
+        assertThat(missingCodeAccountHashes).containsExactly(accountHash);
+        assertThat(missingCodeHashes).containsExactly(codeHash);
+    }
+
+    @Test
+    void healAccountRange_doesNotReportMissingCodeWhenCodeStorageHasEntry() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        Hash codeHash = Hash.wrap(Bytes32.leftPad(Bytes.of(0x77)));
+        byte[] rlp = accountRlp(1, Hash.EMPTY, codeHash);
+
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(accountHash, rlp));
+        seedFlatAccount(fixtureWorldState, accountHash, rlp);
+
+        var transaction = new RocksDBSegmentedStorage(dbManager).startTransaction();
+        transaction.put(KeyValueSegmentIdentifier.CODE_STORAGE, codeHash.toArrayUnsafe(), new byte[] {0x60, 0x60});
+        transaction.commit();
+        transaction.close();
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealer.AccountRangeOutcome outcome = healer.healAccountRange(
+            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, true, 50_000, (scanned, percent) -> {},
+            (foundAccountHash, foundCodeHash) -> fail("expected no missing-code finding"));
+
+        assertThat(outcome.accountsWithMissingCode).isZero();
+    }
+
+    @Test
+    void healAccountRange_skipsMissingCodeCheckForAccountsWithNoCode() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+        Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        // accountRlp(nonce, storageRoot) defaults codeHash to Hash.EMPTY -- an EOA with no code at
+        // all, which is normal and must NOT be reported as a gap even though CODE_STORAGE has
+        // nothing for it.
+        byte[] rlp = accountRlp(1, Hash.EMPTY);
+
+        Bytes32 stateRoot = seedAccountTrie(fixtureWorldState, Map.of(accountHash, rlp));
+        seedFlatAccount(fixtureWorldState, accountHash, rlp);
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        FlatDbHealer.AccountRangeOutcome outcome = healer.healAccountRange(
+            stateRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, true, 50_000, (scanned, percent) -> {},
+            (foundAccountHash, foundCodeHash) -> fail("expected no missing-code finding for an EOA"));
+
+        assertThat(outcome.accountsWithMissingCode).isZero();
     }
 
     /** Builds a real, persisted storage trie for one account and returns its root. */

@@ -5,6 +5,7 @@ import net.consensys.bric.besu.FlatDbHealProgressListener;
 import net.consensys.bric.besu.FlatDbHealResult;
 import net.consensys.bric.besu.FlatDbHealer;
 import net.consensys.bric.db.BesuDatabaseManager;
+import org.hyperledger.besu.datatypes.Hash;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,6 +87,13 @@ public class DbUpgradeFlatDbCommand implements Command {
                 elapsed.toHoursPart(), elapsed.toMinutesPart(), elapsed.toSecondsPart(),
                 result.totalAccountsFixed(), result.totalSlotsFixed()));
         }
+
+        if (result.accountsWithMissingCode > 0) {
+            System.out.println(result.accountsWithMissingCode + " account(s) reference a codeHash missing "
+                + "from CODE_STORAGE — NOT fixed by this run (see warnings above for affected account hashes). "
+                + "Unlike accounts/storage, missing code can't be re-derived locally; recovering it requires "
+                + "re-syncing from a peer.");
+        }
     }
 
     private static final class PrintingProgressListener implements FlatDbHealProgressListener {
@@ -114,6 +122,12 @@ public class DbUpgradeFlatDbCommand implements Command {
         public void onStorageHeartbeat(int accountsHealed, int totalAccountsToHeal, double percentComplete) {
             LOG.info("Storage {}/{} accounts - still running ({}% of this account's storage scanned)",
                 accountsHealed, totalAccountsToHeal, String.format("%.1f", percentComplete));
+        }
+
+        @Override
+        public void onMissingCode(Hash accountHash, Hash codeHash) {
+            LOG.warn("Account {} references codeHash {} which has no entry in CODE_STORAGE "
+                + "(not fixed automatically — see the final summary)", accountHash, codeHash);
         }
     }
 

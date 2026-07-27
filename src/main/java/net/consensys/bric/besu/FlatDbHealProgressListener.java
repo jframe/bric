@@ -1,5 +1,7 @@
 package net.consensys.bric.besu;
 
+import org.hyperledger.besu.datatypes.Hash;
+
 /** Callback for reporting progress during a {@link FlatDbHealer#heal} run. */
 public interface FlatDbHealProgressListener {
     void onRangeComplete(int rangeIndex, int totalRanges, long accountsChecked, long accountsFixed);
@@ -21,6 +23,18 @@ public interface FlatDbHealProgressListener {
      * reached. Defaults to no-op.
      */
     default void onStorageHeartbeat(int accountsHealed, int totalAccountsToHeal, double percentComplete) {
+    }
+
+    /**
+     * Reports an account whose codeHash (read from the trie) has no matching entry in
+     * {@code CODE_STORAGE} — invisible to the account-level add/update/remove diff, since the
+     * account trie only stores the codeHash, never the bytecode itself. Fired immediately per
+     * finding rather than buffered, since accumulating every affected account in memory could
+     * itself grow unbounded on a badly-affected mainnet-size database. Detection only: unlike
+     * accounts/storage, missing code can't be re-derived locally (no trie-derivable source of truth
+     * for arbitrary bytecode bytes). Defaults to no-op.
+     */
+    default void onMissingCode(Hash accountHash, Hash codeHash) {
     }
 
     /** Listener that discards every event — used by tests and dry-run callers that don't print progress. */
