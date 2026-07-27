@@ -362,6 +362,90 @@ class FlatDbHealerTest {
     }
 
     @Test
+    void heal_doesNotLosePendingStorageAccountsFromRangesBeforeASimulatedInterruption() throws Exception {
+        BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
+
+        // Pick accountA's hash to be the start of range 0 and accountB's hash to be the start of
+        // range 1 (per RangeManager.generateAllRanges(16)), so they fall into different
+        // account-range-loop iterations of heal().
+        List<Map.Entry<Bytes32, Bytes32>> ranges =
+            new ArrayList<>(RangeManager.generateAllRanges(16).entrySet());
+        Hash accountAHash = Hash.wrap(ranges.get(0).getKey());
+        Hash accountBHash = Hash.wrap(ranges.get(1).getKey());
+
+        Bytes accountASlotValue = Bytes.of(11);
+        Bytes accountBSlotValue = Bytes.of(22);
+        Hash accountASlot = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));
+        Hash accountBSlot = Hash.wrap(Bytes32.leftPad(Bytes.of(2)));
+
+        Hash accountAStorageRoot = seedStorageTrie(
+            fixtureWorldState, accountAHash, Map.of(accountASlot, accountASlotValue));
+        Hash accountBStorageRoot = seedStorageTrie(
+            fixtureWorldState, accountBHash, Map.of(accountBSlot, accountBSlotValue));
+
+        byte[] accountARlp = accountRlp(1, accountAStorageRoot);
+        byte[] accountBRlp = accountRlp(2, accountBStorageRoot);
+        seedAccountTrie(fixtureWorldState, Map.of(accountAHash, accountARlp, accountBHash, accountBRlp));
+        // Neither account's flat entry is seeded, so both are "missing" and thus divergent —
+        // each one's storage must be healed too.
+
+        // Simulate a process kill partway through the accounts phase: abort while processing
+        // range index 2 (rangeIndex == 3, 1-indexed) — i.e. only *after* both range 0 (accountA)
+        // and range 1 (accountB) have each fully completed, including their own per-range
+        // checkpoint + pending-storage-accounts writes. Range 2 itself has no seeded accounts, so
+        // interrupting mid-range-2 doesn't confound the result with a partially-processed range.
+        FlatDbHealProgressListener interruptingListener = new FlatDbHealProgressListener() {
+            @Override
+            public void onRangeComplete(int rangeIndex, int totalRanges, long accountsChecked, long accountsFixed) {
+                if (rangeIndex == 3) {
+                    throw new SimulatedInterruption();
+                }
+            }
+
+            @Override
+            public void onStorageAccountComplete(
+                    int accountsHealed, int totalAccountsToHeal, long slotsChecked, long slotsFixed) {
+            }
+        };
+
+        FlatDbHealer healer = new FlatDbHealer(dbManager);
+        assertThatThrownBy(() -> healer.heal(false, interruptingListener))
+            .isInstanceOf(SimulatedInterruption.class);
+
+        // After the simulated crash, both accounts' flat entries are already durably fixed (their
+        // ranges' healAccountRange writes are unconditional and both ranges fully completed and
+        // checkpointed before the interruption), so the "resume" checkpoint reflects range 2 as
+        // the next range to process — ranges 0 and 1 will NOT be reprocessed.
+        BonsaiWorldStateKeyValueStorage afterCrashWorldState = buildWorldState(dbManager);
+        assertThat(afterCrashWorldState.getAccount(accountAHash)).contains(Bytes.wrap(accountARlp));
+        assertThat(afterCrashWorldState.getAccount(accountBHash)).contains(Bytes.wrap(accountBRlp));
+
+        // Resume to completion.
+        FlatDbHealer resumedHealer = new FlatDbHealer(dbManager);
+        FlatDbHealResult result = resumedHealer.heal(false, FlatDbHealProgressListener.NO_OP);
+        assertThat(result.dryRun).isFalse();
+
+        BonsaiWorldStateKeyValueStorage verifyWorldState = buildWorldState(dbManager);
+        assertThat(verifyWorldState.getAccount(accountAHash)).contains(Bytes.wrap(accountARlp));
+        assertThat(verifyWorldState.getAccount(accountBHash)).contains(Bytes.wrap(accountBRlp));
+
+        // The key assertion: accountA's storage slot — divergent in the range that was already
+        // checkpointed before the simulated interruption — must still get healed on resume,
+        // not silently dropped forever.
+        RocksDBSegmentedStorage verifyStorage = new RocksDBSegmentedStorage(dbManager);
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountAHash, accountASlot).toArrayUnsafe()))
+            .contains(accountASlotValue.toArrayUnsafe());
+        assertThat(verifyStorage.get(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE,
+                Bytes.concatenate(accountBHash, accountBSlot).toArrayUnsafe()))
+            .contains(accountBSlotValue.toArrayUnsafe());
+    }
+
+    /** Marker exception used only to simulate an interrupted heal() run without failing the test. */
+    private static final class SimulatedInterruption extends RuntimeException {
+    }
+
+    @Test
     void heal_discardsStaleCheckpointWhenStateRootHasMoved() throws Exception {
         BonsaiWorldStateKeyValueStorage fixtureWorldState = openWritableFixtureDatabase();
         Hash accountHash = Hash.wrap(Bytes32.leftPad(Bytes.of(1)));

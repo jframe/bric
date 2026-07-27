@@ -100,11 +100,16 @@ public class FlatDbHealer {
                 listener.onRangeComplete(
                     i + 1, ranges.size(), outcome.accountsChecked, outcome.added + outcome.updated + outcome.removed);
                 if (!dryRun) {
+                    // Persist the accumulated divergent-accounts list alongside every per-range
+                    // checkpoint write (not just once after the whole loop) so an interruption
+                    // right after this range's checkpoint commits can never strand accounts found
+                    // divergent in this or any earlier range: their flat entry is already durably
+                    // fixed, so they'd never be re-flagged as divergent on a resumed run.
+                    persistPendingStorageAccounts(divergentAccounts);
                     persistCheckpoint(new FlatDbHealCheckpoint(stateRoot, FlatDbHealCheckpoint.Phase.ACCOUNTS, i + 1));
                 }
             }
             if (!dryRun) {
-                persistPendingStorageAccounts(divergentAccounts);
                 persistCheckpoint(new FlatDbHealCheckpoint(stateRoot, FlatDbHealCheckpoint.Phase.STORAGE, RANGE_COUNT));
             }
         }
