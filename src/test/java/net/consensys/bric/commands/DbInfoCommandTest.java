@@ -74,9 +74,31 @@ class DbInfoCommandTest {
         assertThat(output).contains("cf1");
         assertThat(output).contains("cf2");
         assertThat(output).contains("TOTAL");
-        // Hex id is shown in brackets after the column family name
-        assertThat(output).contains("cf1 [0x06]");
-        assertThat(output).contains("cf2 [0x0a]");
+        // Known CFs do not show hex ID in brackets
+        assertThat(output).doesNotContain("cf1 [");
+        assertThat(output).doesNotContain("cf2 [");
+    }
+
+    @Test
+    void testExecuteWithUnknownColumnFamilyShowsHexId() throws Exception {
+        when(mockDbManager.isOpen()).thenReturn(true);
+        when(mockDbManager.getCurrentPath()).thenReturn("/path/to/db");
+        when(mockDbManager.getFormat()).thenReturn(DatabaseFormat.BONSAI);
+        when(mockDbManager.getColumnFamilyNames()).thenReturn(Set.of("cf_unknown"));
+
+        DatabaseStats stats = new DatabaseStats();
+        stats.estimatedKeys = 500;
+        stats.totalSstSize = 1024;
+        stats.totalBlobSize = 0;
+
+        when(mockDbManager.getStats("cf_unknown")).thenReturn(stats);
+        // 0x42 does not match any known KeyValueSegmentIdentifier
+        when(mockDbManager.getColumnFamilyId("cf_unknown")).thenReturn(new byte[]{0x42});
+
+        command.execute(new String[]{});
+
+        String output = outputStream.toString();
+        assertThat(output).contains("cf_unknown [0x42]");
     }
 
     @Test

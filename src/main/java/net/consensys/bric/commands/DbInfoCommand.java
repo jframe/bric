@@ -106,7 +106,7 @@ public class DbInfoCommand implements Command {
      */
     private String columnFamilyLabel(String cfName) {
         byte[] id = dbManager.getColumnFamilyId(cfName);
-        if (id == null) {
+        if (id == null || KeyValueSegmentIdentifier.fromId(id) != null) {
             return cfName;
         }
         return cfName + " [" + KeyValueSegmentIdentifier.toHexId(id) + "]";
