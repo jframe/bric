@@ -10,12 +10,15 @@ A command-line REPL tool for exploring Hyperledger Besu databases. Query account
 - 💾 **Storage Exploration** - Query contract storage slots by address and slot number
 - 📜 **Bytecode Access** - Retrieve and save contract bytecode
 - 📊 **Trie Log Analysis** - Examine state changes (diffs) per block with detailed formatting
-- 🗄️ **Database Management** - Read-only access to Besu Bonsai and Bonsai Archive databases
+- ✅ **Trie Log Validation** - Compare trie logs against archived flat DB state, or check for gaps in trie-log retention
+- 🗄️ **Database Management** - Read-only (by default) access to Besu Bonsai and Bonsai Archive databases
 - 📈 **Database Statistics** - View column family sizes and key counts
+- 🛠️ **Low-Level Access** - Raw get/put/scan by column family, drop a column family, and run manual compactions (all require opting into write mode)
+- 🩹 **Flat DB Heal** - Reconcile a Bonsai flat DB against the canonical trie, with resumable checkpoints and safe cancellation
 
 ## Requirements
 
-- Java 21 or higher
+- Java 25 or higher
 - Gradle 8.x or higher (or use the Gradle wrapper)
 - Access to a Besu database (Bonsai or Bonsai Archive format)
 
@@ -98,20 +101,63 @@ Once the REPL is running, you can use the following commands:
 
 ### Database Commands
 
-#### `db open <path>`
-Open a Besu database in read-only mode. Automatically detects database format (Bonsai or Bonsai Archive).
+#### `db open <path> [--write]`
+Open a Besu database. Read-only by default; automatically detects database format (Bonsai, Bonsai Archive, or Forest). Pass `--write` to allow the write-mode-only commands below (`put`, `drop-cf`, `compact`, `upgrade-flatdb`).
 
 **Examples:**
 ```
 db open /path/to/besu/database
-db open ~/besu-data/database
+db open ~/besu-data/database --write
 ```
 
 #### `db close`
-Close the currently open database.
+Close the currently open database. Refuses to close while a manual compaction job is still running.
 
 #### `db info`
 Display detailed database statistics including column family sizes and estimated key counts.
+
+#### `db get <segment> <hex-key>`
+Read a single raw value by column family and key.
+
+**Example:**
+```
+db get ACCOUNT_INFO_STATE 0x1234...abcd
+```
+
+#### `db put <segment> <hex-key> <hex-value>` (requires `--write`)
+Write a raw value by column family and key. Use with care — this bypasses all higher-level validation.
+
+#### `db scan <segment> [--limit n]`
+Iterate raw key/value entries in a column family, printing each as `Key -> Value`. Defaults to unlimited; use `--limit` to cap output.
+
+**Example:**
+```
+db scan CODE_STORAGE --limit 20
+```
+
+#### `db drop-cf <segment>` (requires `--write`)
+Drop a column family entirely. Refuses to drop `default`.
+
+#### `db stats [cf-name]`
+Show detailed RocksDB internal stats (`rocksdb.stats`, `rocksdb.levelstats`, SST table info) for one column family, or all non-empty column families if none is given.
+
+#### `db compact <segment...|--all>` (requires `--write`)
+Submit an asynchronous manual compaction job for one or more column families (or every non-empty one with `--all`). Returns immediately with a job id per column family.
+
+#### `db compact-status [<job-id>]`
+List all compaction jobs (id, column family, state, elapsed time, pending compaction bytes), or show detail for a single job.
+
+#### `db compact-cancel <job-id>` (requires `--write`)
+Request cancellation of a running compaction job.
+
+#### `db upgrade-flatdb [--dry-run]` (requires `--write` unless `--dry-run`)
+Heal a Bonsai/Bonsai Archive flat DB left in `PARTIAL` mode by reconciling it against the canonical trie: walks the account trie and each divergent account's storage trie, fixes drifted flat entries, and reports (without attempting to fix) any accounts referencing a `codeHash` missing from `CODE_STORAGE`. Progress is reported per range/account, with throttled percent-complete heartbeats for long-running ranges. Safe to interrupt with Ctrl-C — a resumable checkpoint is saved after every range, and shutdown coordinates with the in-progress heal to avoid crashing the JVM. `--dry-run` reports what would change without writing anything or touching the checkpoint.
+
+**Example:**
+```
+db upgrade-flatdb --dry-run
+db upgrade-flatdb
+```
 
 ### Account Commands
 
@@ -178,15 +224,36 @@ code-hash 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
 ### Trie Log Commands
 
-#### `trielog <block-hash>`
+#### `trielog <block-hash> [--address <address>]`
 Query trie log (state diff) for a specific block. Shows detailed state changes including:
 - **Account Changes**: Created, updated, or deleted accounts with balance/nonce/storage root changes
 - **Code Changes**: Deployed or cleared contract code
 - **Storage Changes**: Storage slot modifications
 
+Pass `--address` to filter the output down to a single account.
+
 **Example:**
 ```
 trielog 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+trielog 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef --address 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
+```
+
+#### `trielog-compare <block-number|block-hash|start..end> [--verbose]`
+**Bonsai Archive only.** Validates that a block's recorded trie log matches what's actually stored in the archive flat DB at that block — useful for catching archive corruption or write bugs. Compares account (nonce/balance/storageRoot/codeHash), storage slot, and code hash changes; reports mismatches by default, or every comparison (matches included) with `--verbose`. Accepts a single block or a `start..end` range, printing progress periodically for ranges.
+
+**Examples:**
+```
+trielog-compare 12345
+trielog-compare 12000..12500
+trielog-compare 0x1234...abcdef --verbose
+```
+
+#### `trielog-check <block|start..end>`
+Cheap existence check (no decoding) for whether a trie log is present for each block in the given block or range. Works on any database format; use it to find gaps in trie-log retention.
+
+**Example:**
+```
+trielog-check 12000..12500
 ```
 
 **Output Example:**
@@ -216,7 +283,7 @@ Address: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0
       Value: 0x0 → 0x1
 ```
 
-**Note:** Trie logs are only available in Besu Bonsai Archive databases.
+**Note:** Trie logs are only available in Besu Bonsai Archive databases (`trielog`, `trielog-compare`). `trielog-check` only tests for existence and works against any database format.
 
 ## Development
 
@@ -279,6 +346,10 @@ Account and storage data is RLP-encoded in the database:
 - **Account**: `RLP[nonce, balance, storageRoot, codeHash]`
 - **Storage**: `RLP[UInt256]`
 - **Trie Logs**: Complex nested RLP structure parsed using `TrieLogFactoryImpl`
+
+### Write Mode and Safety
+
+Bric opens databases read-only unless you pass `--write` to `db open`. Write mode is required for `db put`, `db drop-cf`, `db compact`, and `db upgrade-flatdb`. Manual compaction jobs run asynchronously in the background (tracked via `db compact-status`), and the database won't close while one is still running. A flat DB heal (`db upgrade-flatdb`) can be safely interrupted with Ctrl-C — it checkpoints its progress and coordinates with shutdown to avoid corrupting the database or crashing the JVM.
 
 ## License
 
